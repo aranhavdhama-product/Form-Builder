@@ -242,7 +242,7 @@ function pickupCell(key: string, r: LocalPickupRow): ReactNode | undefined {
     case 'vehicleType': return or(r.vehicleType)
     case 'vehicleUnit': return or(r.vehicleUnit)
     case 'sizeClass': return or(r.sizeClass)
-    case 'schedulingConfirmed': return r.request.status === 'Requested' ? 'No' : 'Yes'
+    case 'schedulingConfirmed': return r.request.status === 'Pickup Requested' ? 'No' : 'Yes'
     default:
       return undefined
   }

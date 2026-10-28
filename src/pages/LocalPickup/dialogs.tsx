@@ -161,7 +161,11 @@ const hubOfStore = (s: StoreLocation | undefined): string | null =>
  * ONE shipTo per request, so each request stores its line's first mapped
  * address. 2026-10-07: ONE vehicle only (no Add vehicle, no count) — the service and the vehicle sit side by side.
  */
-export function CreatePickupDialog({ onClose, onDone }: { onClose: () => void; onDone: (prs: GrowPickupRequest[]) => void }) {
+export function CreatePickupDialog({ onClose, onDone, title = 'Blind pickup request', subtitle = 'Book a pickup before the consignments exist.' }: {
+  onClose: () => void; onDone: (prs: GrowPickupRequest[]) => void
+  /** the Pickup request modal passes its own title and the Waiting / Blind switch (owner, 2026-10-22) */
+  title?: string; subtitle?: ReactNode
+}) {
   const db = useGrowOrders()
   useVehicleConfig()   // re-render when the per-hub fleet changes
   const merchants = useMemo(() => merchantsOf(db.stores), [db.stores])
@@ -255,7 +259,7 @@ export function CreatePickupDialog({ onClose, onDone }: { onClose: () => void; o
   )
 
   return (
-    <Modal open wide title="Blind pickup request" subtitle="Book a pickup before the consignments exist." onClose={onClose}
+    <Modal open wide title={title} subtitle={subtitle} onClose={onClose}
       footer={<Footer onClose={onClose} onConfirm={submit}
         label="Create blind pickup" />}>
       <div className="flex flex-col gap-5 pb-3">
@@ -506,7 +510,7 @@ export function AssignCarrierDialog({ prs, onClose, onDone }: { prs: GrowPickupR
             labels={(v) => { const x = options.find((y) => y.code === v); return x ? `${x.name} · ${x.mode === 'CARRIER' ? '3PL' : 'Own fleet'}` : v }}
             onChange={setCode} />
         </Field>
-        {c?.mode === 'CARRIER' && <Hint>A 3PL runs the collection itself — no fleet trip. Requested / Planned pickups move to Assigned.</Hint>}
+        {c?.mode === 'CARRIER' && <Hint>A 3PL runs the collection itself — no fleet trip. Pickup Requested pickups move to Driver Assigned For Pickup.</Hint>}
       </div>
     </Modal>
   )
@@ -534,7 +538,7 @@ export function RescheduleDialog({ prs, onClose, onDone }: { prs: GrowPickupRequ
       <div className="flex flex-col gap-3 pb-3">
         <Scope ok={ok} skipped={skipped} verb="moved" />
         <WindowFields win={win} />
-        {routed.length > 0 && <Hint>{routed.map((p) => p.number).join(', ')} {routed.length === 1 ? 'is' : 'are'} on a trip — rescheduling takes {routed.length === 1 ? 'it' : 'them'} off the trip and back to Requested.</Hint>}
+        {routed.length > 0 && <Hint>{routed.map((p) => p.number).join(', ')} {routed.length === 1 ? 'is' : 'are'} on a trip — rescheduling takes {routed.length === 1 ? 'it' : 'them'} off the trip and back to Pickup Requested.</Hint>}
       </div>
     </Modal>
   )

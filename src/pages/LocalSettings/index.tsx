@@ -23,6 +23,9 @@ export default function LocalSettings() {
         <ListCard icon={<Columns3 size={18} />} title="Column configuration"
           desc="Columns, filters and their order on the Pending for Planning listing."
           onClick={() => navigate('/local/columns')} />
+        <ListCard icon={<Columns3 size={18} />} title="Pickup columns"
+          desc="Columns, their order, filters and search on the Pickup page."
+          onClick={() => navigate('/local/columns/pickup')} />
         <ListCard icon={<Truck size={18} />} title="Pickup module"
           desc="Turn pickups on or off, choose who books them and set the booking rules."
           onClick={() => navigate('/local/settings/pickup')} />

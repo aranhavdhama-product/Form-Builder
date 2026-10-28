@@ -277,10 +277,10 @@ export function FilterDropdown({ label, options, value, onChange }: {
   )
 }
 
-export function Toggle({ checked, onChange }: { checked: boolean; onChange?: (v: boolean) => void }) {
+export function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange?: (v: boolean) => void; disabled?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} onClick={() => onChange?.(!checked)}
-      className={`relative h-5 w-9 rounded-full transition-colors ${checked ? 'bg-brand-500' : 'bg-warm-300'}`}>
+    <button type="button" role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange?.(!checked)}
+      className={`relative h-5 w-9 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${checked ? 'bg-brand-500' : 'bg-warm-300'}`}>
       <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${checked ? 'left-[18px]' : 'left-0.5'}`} />
     </button>
   )
@@ -1025,7 +1025,7 @@ export function Field({ label, required, info, children, full }: { label: string
   return (
     <div className={full ? 'col-span-2' : ''}>
       <label className="mb-1.5 flex items-center gap-1 field-label">
-        {label}{required && <span className="text-brand-500">*</span>}{info && <Info size={12} className="text-warm-400" />}
+        {label}{required && <span className="req-star">*</span>}{info && <Info size={12} className="text-warm-400" />}
       </label>
       {children}
     </div>

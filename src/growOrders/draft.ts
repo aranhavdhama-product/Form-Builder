@@ -148,6 +148,8 @@ export interface ConsignmentFields {
   dedicateTruck?: boolean
   totalLoadingTime?: number | null
   clearanceRequired?: boolean
+  /** Grow (owner, 2026-10-27): the merchant declared the shipment holds no dangerous goods */
+  dgDeclared?: boolean
   scannable?: boolean
   splittable?: boolean
   /** consignment category flags: 4 Person · Stackable · Fragile · VIP · Hazmat · Heavy Weight */

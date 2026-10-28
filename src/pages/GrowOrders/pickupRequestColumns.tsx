@@ -21,7 +21,7 @@ import { usePrGridColumns, type PrCells } from '../LocalPickup/prColumns'
 import { PrStatusChip } from './pickupRequestTable'
 
 /** Columns that are the carrier's business, never the merchant's. */
-const OPS_ONLY_KEYS = ['merchant', 'source', 'trip']
+const OPS_ONLY_KEYS = ['merchant', 'rider']
 /** A 3PL is the merchant's to know (who comes to collect); the fleet driver is not. */
 const CARRIER_DEF: PrColumnDef = {
   key: 'carrier', label: 'Carrier', width: 150,
@@ -30,10 +30,9 @@ const CARRIER_DEF: PrColumnDef = {
 const MERCHANT_DEFS: PrColumnDef[] = PR_COLUMN_DEFS
   .filter((d) => !OPS_ONLY_KEYS.includes(d.key))
   /* the status cell also carries the merchant's flags — give it room */
-  .map((d) => (d.key === 'collector' ? CARRIER_DEF : d))
+  .map((d) => (d.key === 'carrier' ? CARRIER_DEF : d))
 const GROW_DEFAULT_KEYS = PR_DEFAULT_COLUMN_KEYS
   .filter((k) => !OPS_ONLY_KEYS.includes(k))
-  .map((k) => (k === 'collector' ? 'carrier' : k))
 
 /**
  * The pickup-request grid's columns for a Nueva `DataTable`, plus its ⚙

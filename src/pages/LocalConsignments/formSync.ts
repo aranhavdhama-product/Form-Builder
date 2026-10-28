@@ -17,6 +17,7 @@ import {
 } from './formSetup'
 import { BEHAVIOR_KEY, FIELD_CONFIG_KEY } from '../ConsignmentAdd/fieldConfig'
 import { PFP_COLUMNS_CONSIGNMENT_KEY, PFP_COLUMNS_PICKUP_KEY, PFP_VIEW_KEY } from '../LocalPFP/viewSetup'
+import { PICKUP_COLUMN_CONFIG_KEY } from '../LocalPickup/pickupColumnConfig'
 
 /** what a stored value must look like — a server copy with anything else is not used */
 type Kind = 'object' | 'array' | 'goods'
@@ -34,6 +35,8 @@ export const SETUP_KEYS: Record<string, Kind> = {
   [BEHAVIOR_KEY]: 'object', [FIELD_CONFIG_KEY]: 'object',
   /* Pending For Planning: how each tab opens (View + Group by) and its columns — one demo, the same page for every visitor */
   [PFP_VIEW_KEY]: 'object', [PFP_COLUMNS_PICKUP_KEY]: 'array', [PFP_COLUMNS_CONSIGNMENT_KEY]: 'array',
+  /* the Pickup page's column configuration (Settings › Pickup columns) */
+  [PICKUP_COLUMN_CONFIG_KEY]: 'object',
 }
 const isSetupKey = (k: string) => Object.hasOwn(SETUP_KEYS, k)
 const VERSION = 1

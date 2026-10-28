@@ -15,7 +15,7 @@
 import { useLocation } from 'react-router-dom'
 import { pickupPagesVisible, usePickupModuleConfig } from '../config/pickupModule'
 import {
-  CalendarClock, Package, Radar, RotateCcw, Route, Settings, Smartphone, Store, Truck,
+  CalendarClock, Package, ScanLine, Radar, RotateCcw, Route, Settings, Smartphone, Store, Truck,
   Warehouse, Waypoints,
 } from 'lucide-react'
 import { ShellRowBody, ShellSidebar, type ShellNavItem } from './shell'
@@ -48,6 +48,8 @@ const LOCAL_NAV: LocalNavItem[] = [
     path: '/local/pending-for-planning',
     owns: '/local/pending-for-planning',
   },
+  /* SED-14605 (RCBC): scan consignments into a list and allocate their carrier */
+  { id: 'pending-for-planning-scan', label: 'Scan & Allocate', icon: ScanLine, path: '/local/pending-for-planning-scan', owns: '/local/pending-for-planning-scan' },
   /* the -replica route stays for the pixel-diff tooling but is not in the rail
      (owner, 2026-09-24): ONE Pending for Planning, whose look follows the module */
   /* owner, 2026-09-25: Pickup sits ABOVE Routing */

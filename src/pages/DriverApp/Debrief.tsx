@@ -66,7 +66,7 @@ export default function DebriefScreen({ trip, planning, onBack, onComplete }: {
         const handed = isHandedOver(p)
         return (
           <div key={p.id}>
-            <SectionLabel right={<Chip tone={p.status === 'Completed' ? (handed ? 'green' : 'blue') : 'red'}>{p.status === 'Completed' ? (handed ? 'Handed Over' : `${p.pickedOrderIds.length} picked`) : p.status}</Chip>}>
+            <SectionLabel right={<Chip tone={p.status === 'Pickedup' ? (handed ? 'green' : 'blue') : 'red'}>{p.status === 'Pickedup' ? (handed ? 'Handed Over' : `${p.pickedOrderIds.length} picked`) : p.status}</Chip>}>
               {p.number}
             </SectionLabel>
             <Card pad="none">

@@ -120,7 +120,7 @@ export default function LocalControlTower() {
     if (t.attention) items.push({ label: 'Clear attention', onClick: () => { planningActions.clearAttention(t.id); toast.success('Attention cleared.') } })
     if (t.status === 'Un-assigned' || t.status === 'Yet to start') {
       items.push({ label: 'Cancel trip', tone: 'danger', onClick: () => {
-        if (planningActions.cancelTrip(t.id)) toast.success(`${t.id} cancelled — its collections are back to Requested.`)
+        if (planningActions.cancelTrip(t.id)) toast.success(`${t.id} cancelled — its collections are back to Pickup Requested.`)
       } })
     }
     return items

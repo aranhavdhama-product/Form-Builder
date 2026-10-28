@@ -58,7 +58,7 @@ const logOf = (code: string, by: string, change: string): ScheduleAudit => ({ at
 function retireStaleRequests(id: string, after: PickupSchedule | null) {
   const today = ymd(new Date())
   for (const pr of growOrdersSnapshot().pickupRequests) {
-    if (pr.schedule?.id !== id || pr.date < today || pr.status !== 'Requested' || pr.tripId) continue
+    if (pr.schedule?.id !== id || pr.date < today || pr.status !== 'Pickup Requested' || pr.tripId) continue
     const run = after?.runs.find((r) => r.id === pr.schedule!.runId)
     const valid = !!after && after.status === 'Active' && !!run && runLabel(run) === pr.schedule.runLabel && after.days.includes(dayOf(pr.date))
       && pr.date >= after.effectiveFrom && (!after.effectiveTo || pr.date <= after.effectiveTo)

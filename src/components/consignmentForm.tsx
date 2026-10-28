@@ -61,9 +61,9 @@ export function Fld({ label, required, info, error, helper, className = '', chil
 }) {
   return (
     <div className={`min-w-0 ${className}`}>
-      <label className="mb-1.5 flex h-5 items-center gap-1 whitespace-nowrap field-label" title={label}>
-        <span className="truncate">{label}</span>
-        {required && <span className="shrink-0 text-brand-500">*</span>}
+      <label className="mb-1.5 flex min-h-5 items-start gap-1 field-label" title={label}>
+        <span className="min-w-0 break-words">{label}</span>
+        {required && <span className="req-star">*</span>}
         {info && <Info size={12} className="shrink-0 text-brand-500" />}
       </label>
       {children}
@@ -268,7 +268,7 @@ export function SFld({ label, required, info, error, helper, className = '', chi
   return (
     <div className={`min-w-0 ${className}`}>
       <label className="mb-2 flex min-h-5 items-start gap-1 field-label" title={label}>
-        <span className="min-w-0">{label || '\u00a0'}{required && <span className="text-danger-fg">&nbsp;*</span>}</span>
+        <span className="min-w-0">{label || '\u00a0'}{required && <span className="req-star">*</span>}</span>
         {info && <Info size={13} className="shrink-0 text-brand-500" />}
       </label>
       <div className="relative">

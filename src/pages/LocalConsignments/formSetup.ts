@@ -3,10 +3,13 @@
  * Pure module (no React): read by the form, its builder, the Consignment Order settings page and the two
  * consignment views.
  *
- *   Console form      `fe-consignment-form-v2-rules` (unchanged key) — the console's Add Consignment.
- *   Grow portal form  `fe-consignment-form-v2-rules-grow` — ONLY what differs for Grow. Grow follows the
- *                     console form field by field until a field is changed for Grow (an overlay), so the
- *                     2026-09-29 rule "a console customisation is the same on Grow" still holds by default.
+ *   ONE builder, two previews (owner, 2026-10-28: "merge the Grow form builder with the consignment form builder —
+ *   wherever there is a conflict the consignment wins, except the service type choice and the UI styles"):
+ *   Console rules     `fe-consignment-form-v2-rules` — every field setting both forms share (name, Required, More,
+ *                     width, explainer, character limit) + `hidden` = **Show for Ops** off.
+ *   Grow rules        `fe-consignment-form-v2-rules-grow` — only `hidden` = **Show for Grow** (on its own, never the
+ *                     console's), and Grow's own Service Type rule. Anything else an older save left there is ignored.
+ *   Per form (the UI style): the layout, the Summary card and the order of the cards. Shared: the fields' order.
  *   Custom fields     `fe-consignment-form-v2-custom` — fields the account adds beside the system's, ONE list
  *                     for both portals; each portal's rules say whether a field is shown there.
  *
@@ -90,13 +93,14 @@ const asFormat = (raw: unknown): FieldFormat | undefined => {
 
 /* ------------------------------------------------------------------- rules ---- */
 
-/** How much of its row a field takes (owner, 2026-10-07: "S / M / L / Full" in the builder): S = one column (the normal
-    size) · M = half the row · L = three quarters · Full = the whole row. In a package's line the same four mean widths. */
+/** How wide a field is (owner, 2026-10-28: "S less than the current width, M the current default, L two columns, Full the
+    whole row"): S = half a field · M = one field, the normal size (absent = M) · L = two fields · Full = the whole row.
+    In a package's line the same four mean narrower · own size · wider · the line. */
 export type FieldWidth = 's' | 'm' | 'l' | 'full'
 export const FIELD_WIDTHS: { value: FieldWidth; label: string; tip: string }[] = [
-  { value: 's', label: 'S', tip: 'Small — one column, the normal size' },
-  { value: 'm', label: 'M', tip: 'Medium — half the row' },
-  { value: 'l', label: 'L', tip: 'Large — three quarters of the row' },
+  { value: 's', label: 'S', tip: 'Small — half a field' },
+  { value: 'm', label: 'M', tip: 'Medium — one field, the normal size' },
+  { value: 'l', label: 'L', tip: 'Large — two fields wide' },
   { value: 'full', label: 'Full', tip: 'Full — the whole row' },
 ]
 export const asWidth = (v: unknown): FieldWidth | undefined => (v === 's' || v === 'm' || v === 'l' || v === 'full' ? v : undefined)
@@ -106,8 +110,15 @@ export interface FieldRuleV2 {
   width?: FieldWidth
   /** true = in its section's "More information" fold, false = in the main grid (absent = the default) */
   more?: boolean
-  /** what may be typed (text fields) */
+  /** what may be typed (text fields) — retired 2026-10-27 (owner: "remove validation thing from form builder"); kept so an
+      old saved rule still parses, never applied */
   format?: FieldFormat
+  /** owner, 2026-10-27: an explainer shown as an ⓘ beside the field's name (≤ 150 characters) */
+  tooltip?: string
+  /** owner, 2026-10-27: the most characters a typed-text field takes */
+  maxLength?: number
+  /** a card's ⓘ (rule key `card:<section id>`, owner 2026-10-28): true = no ⓘ on the card; its text is `tooltip` */
+  noTip?: boolean
   /** the value a hidden field gives every consignment — Service Type's default service (owner, 2026-10-05: "in Service
       Type I can't hide that field") */
   defaultValue?: string
@@ -131,25 +142,52 @@ export function asRules(raw: unknown): FormRulesV2 {
       ...(asWidth(r.width) ? { width: asWidth(r.width) } : {}),
       ...(format ? { format } : {}),
       ...(typeof r.defaultValue === 'string' && r.defaultValue.trim() ? { defaultValue: r.defaultValue.trim() } : {}),
+      ...(typeof r.tooltip === 'string' && r.tooltip.trim() ? { tooltip: r.tooltip.trim().slice(0, 150) } : {}),
+      ...(r.noTip === true ? { noTip: true } : {}),
+      ...(typeof r.maxLength === 'number' && Number.isFinite(r.maxLength) && r.maxLength >= 1 ? { maxLength: Math.min(500, Math.round(r.maxLength)) } : {}),
     }
     if (Object.keys(rule).length) out[k] = rule
   }
   return out
 }
 const keyOf = (p: FormPortal) => (p === 'grow' ? FORM_RULES_GROW_KEY : FORM_RULES_V2_KEY)
-/** the console form's rules, or the Grow form's OWN changes (see `growRules` for what Grow shows) */
+/** the console form's rules, or Grow's OWN (Show for Grow + its Service Type — see `growRules` for what Grow shows) */
 export const loadRules = (p: FormPortal): FormRulesV2 => {
   let r: FormRulesV2 = {}
   try { r = asRules(JSON.parse(localStorage.getItem(keyOf(p)) ?? '{}')) } catch { /* a broken value = no rules */ }
-  return withLegacyGoods(p, r)
+  r = withLegacyGoods(p, r)
+  return p === 'grow' ? growOwnOnly(r) : r
 }
 export const saveRules = (p: FormPortal, r: FormRulesV2) => {
-  try { localStorage.setItem(keyOf(p), JSON.stringify(asRules(r))) } catch { /* private mode */ }
+  try { localStorage.setItem(keyOf(p), JSON.stringify(asRules(p === 'grow' ? growOwnOnly(r) : r))) } catch { /* private mode */ }
 }
-/** Grow's effective rules: the console form's, with Grow's own changes on top (property by property). */
-export function growRules(consoleRules: FormRulesV2, growChanges: FormRulesV2): FormRulesV2 {
-  const out: FormRulesV2 = { ...consoleRules }
-  for (const [k, v] of Object.entries(growChanges)) out[k] = { ...out[k], ...v }
+/** the fields whose WHOLE rule is Grow's own — the merchant picks a service from priced cards, the console from a list */
+export const GROW_OWN_KEYS = new Set(['serviceType'])
+/**
+ * Grow's effective rules: the console form's shared settings (the console wins every conflict), Show for Grow from Grow's
+ * own `hidden` (the console's Show for Ops never hides a field on Grow), and Grow's own Service Type.
+ */
+export function growRules(consoleRules: FormRulesV2, growOwn: FormRulesV2): FormRulesV2 {
+  const out: FormRulesV2 = {}
+  for (const [k, v] of Object.entries(consoleRules)) {
+    if (GROW_OWN_KEYS.has(k)) continue
+    const rest: FieldRuleV2 = { ...v }
+    delete rest.hidden
+    if (Object.keys(rest).length) out[k] = rest
+  }
+  for (const [k, v] of Object.entries(growOwn)) {
+    if (GROW_OWN_KEYS.has(k)) out[k] = { ...v }
+    else if (v.hidden !== undefined) out[k] = { ...out[k], hidden: v.hidden }
+  }
+  return out
+}
+/** what the Grow key keeps: Show for Grow, and Grow's own Service Type */
+export function growOwnOnly(r: FormRulesV2): FormRulesV2 {
+  const out: FormRulesV2 = {}
+  for (const [k, v] of Object.entries(r)) {
+    if (GROW_OWN_KEYS.has(k)) { if (Object.keys(v).length) out[k] = { ...v } }
+    else if (v.hidden !== undefined) out[k] = { hidden: v.hidden }
+  }
   return out
 }
 /** drop rules for keys that no longer exist (a removed custom field) */
@@ -221,8 +259,12 @@ export type AddressArrangement = 'side' | 'stack'
 export type SkuListLayout = 'under' | 'separate'
 export type AddressRole = 'shipFrom' | 'shipTo' | 'rto'
 export const ADDRESS_ROLES: AddressRole[] = ['shipFrom', 'shipTo', 'rto']
-export interface FormLayout { shipFrom: AddressEntry; shipTo: AddressEntry; rto: AddressEntry; services: ServiceLayout; addresses: AddressArrangement; skuList: SkuListLayout }
-export const DEFAULT_LAYOUT: FormLayout = { shipFrom: 'cards', shipTo: 'cards', rto: 'cards', services: 'grid', addresses: 'side', skuList: 'under' }
+export interface FormLayout {
+  shipFrom: AddressEntry; shipTo: AddressEntry; rto: AddressEntry; services: ServiceLayout; addresses: AddressArrangement; skuList: SkuListLayout
+  /** the Service Type cards show each service's price / its estimated days (owner, 2026-10-28: "configured for Ops and Grow") */
+  servicePrice: boolean; serviceEta: boolean
+}
+export const DEFAULT_LAYOUT: FormLayout = { shipFrom: 'cards', shipTo: 'cards', rto: 'cards', services: 'grid', addresses: 'side', skuList: 'under', servicePrice: true, serviceEta: true }
 export const LAYOUT_KEY = 'fe-consignment-form-v2-layout'
 export const LAYOUT_GROW_KEY = 'fe-consignment-form-v2-layout-grow'
 const isEntry = (v: unknown): v is AddressEntry => v === 'cards' || v === 'inline'
@@ -238,27 +280,21 @@ const asLayout = (raw: unknown): Partial<FormLayout> => {
   else if (r.services === 'grid' || r.services === 'list') out.services = 'grid'
   if (r.addresses === 'side' || r.addresses === 'stack') out.addresses = r.addresses
   if (r.skuList === 'under' || r.skuList === 'separate') out.skuList = r.skuList
+  if (typeof r.servicePrice === 'boolean') out.servicePrice = r.servicePrice
+  if (typeof r.serviceEta === 'boolean') out.serviceEta = r.serviceEta
   return out
 }
 const readLayout = (key: string): Partial<FormLayout> => {
   try { return asLayout(JSON.parse(localStorage.getItem(key) ?? '{}')) } catch { return {} }
 }
-/** the console's layout; Grow = the console's with Grow's own choices on top */
+/** each form's own layout (the UI style — owner, 2026-10-28: Grow and the console look different); Grow no longer
+    follows the console's choices */
 export function loadLayout(p: FormPortal = 'console'): FormLayout {
-  const base = { ...DEFAULT_LAYOUT, ...readLayout(LAYOUT_KEY) }
-  return p === 'grow' ? { ...base, ...readLayout(LAYOUT_GROW_KEY) } : base
+  return { ...DEFAULT_LAYOUT, ...readLayout(p === 'grow' ? LAYOUT_GROW_KEY : LAYOUT_KEY) }
 }
 export function saveLayout(p: FormPortal, l: FormLayout) {
-  try {
-    if (p === 'console') { localStorage.setItem(LAYOUT_KEY, JSON.stringify(asLayout(l))); return }
-    const base = loadLayout('console')
-    const diff: Partial<FormLayout> = {}
-    for (const k of [...ADDRESS_ROLES, 'services', 'addresses', 'skuList'] as const) if (l[k] !== base[k]) Object.assign(diff, { [k]: l[k] })
-    if (Object.keys(diff).length) localStorage.setItem(LAYOUT_GROW_KEY, JSON.stringify(diff))
-    else localStorage.removeItem(LAYOUT_GROW_KEY)
-  } catch { /* private mode */ }
+  try { localStorage.setItem(p === 'grow' ? LAYOUT_GROW_KEY : LAYOUT_KEY, JSON.stringify(asLayout(l))) } catch { /* private mode */ }
 }
-
 /* --------------------------------------------------------------- field order ---- */
 
 /**
@@ -284,18 +320,23 @@ const asOrder = (raw: unknown): FormOrder => {
 const readOrder = (key: string): FormOrder => {
   try { return asOrder(JSON.parse(localStorage.getItem(key) ?? '{}')) } catch { return {} }
 }
-/** the console's order; Grow = the console's with Grow's own zones on top */
+/** the zone holding the order of the CARDS — per form (Grow has its own cards); every other zone is shared */
+export const SECTION_ZONE = '__sections'
+/** the fields' order is shared (the console's); only the cards' order is each form's own */
 export function loadOrder(p: FormPortal = 'console'): FormOrder {
   const base = readOrder(ORDER_KEY)
-  return p === 'grow' ? { ...base, ...readOrder(ORDER_GROW_KEY) } : base
+  if (p === 'console') return base
+  const own = readOrder(ORDER_GROW_KEY)[SECTION_ZONE]
+  const out = { ...base }
+  delete out[SECTION_ZONE]
+  return own ? { ...out, [SECTION_ZONE]: own } : out
 }
+/** console: the shared field order + the console's card order · grow: only Grow's card order */
 export function saveOrder(p: FormPortal, o: FormOrder) {
   try {
     if (p === 'console') { localStorage.setItem(ORDER_KEY, JSON.stringify(asOrder(o))); return }
-    const base = readOrder(ORDER_KEY)
-    const diff: FormOrder = {}
-    for (const [k, v] of Object.entries(asOrder(o))) if (JSON.stringify(v) !== JSON.stringify(base[k] ?? null)) diff[k] = v
-    if (Object.keys(diff).length) localStorage.setItem(ORDER_GROW_KEY, JSON.stringify(diff))
+    const own = asOrder(o)[SECTION_ZONE]
+    if (own) localStorage.setItem(ORDER_GROW_KEY, JSON.stringify({ [SECTION_ZONE]: own }))
     else localStorage.removeItem(ORDER_GROW_KEY)
   } catch { /* private mode */ }
 }
@@ -361,7 +402,7 @@ export const CUSTOM_FIELD_KINDS: { value: CustomFieldKind; label: string }[] = [
 /** the cards a custom field can sit in */
 export type CustomFieldCard = 'sec-consignment' | 'sec-handling' | 'sec-service'
 export const CUSTOM_FIELD_CARDS: Record<CustomFieldCard, string> = {
-  'sec-consignment': 'Consignment details', 'sec-handling': 'Handling', 'sec-service': 'Service & instructions',
+  'sec-consignment': 'Consignment details', 'sec-handling': 'Handling & Instructions — handling', 'sec-service': 'Handling & Instructions — instructions',
 }
 export interface CustomFieldDef {
   /** `cf:<id>` — the rules key, and the key a value is stored under */

@@ -15,7 +15,7 @@ import {
 } from '../../nueva/components'
 import { growOrdersSnapshot, pickupRequestById } from '../../growOrders/store'
 import { INBOUND_HUBS } from '../../growOrders/hubs'
-import { isOpenPr } from '../../growOrders/tabs'
+import { isOpenPr, isRaisedOpenPr } from '../../growOrders/tabs'
 import { planningActions } from '../LocalPFP/planningStore'
 
 type Outcome = 'Received' | 'Marked picked · PR pending' | 'Unknown · overage held' | 'Already scanned'
@@ -57,7 +57,7 @@ function sampleCodes(): string[] {
   const pending = db.pickupRequests.flatMap((p) => [...new Set([...p.pickedOrderIds, ...p.handover.driverScanned])]
     .filter((i) => !p.handover.hubScanned.includes(i)))
   const already = db.pickupRequests.flatMap((p) => p.handover.hubScanned)
-  const notPicked = db.pickupRequests.filter((p) => isOpenPr(p.status) && p.handover.mode !== 'hub').flatMap((p) => p.orderIds)
+  const notPicked = db.pickupRequests.filter((p) => isRaisedOpenPr(p.status) && p.handover.mode !== 'hub').flatMap((p) => p.orderIds)
   for (const list of [pending, already, notPicked]) {
     const n = list.map(num).find((x): x is string => !!x && !out.includes(x))
     if (n) out.push(n)

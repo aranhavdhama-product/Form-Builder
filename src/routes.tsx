@@ -56,6 +56,7 @@ import LocalVehicleEditor from './pages/LocalRouting/VehicleEditor'
 import LocalInboundScanner from './pages/LocalInbound/Scanner'
 import LocalPendingForPlanning from './pages/LocalPFP'
 import LocalColumnConfiguration from './pages/LocalPFP/TableSettings'
+import PickupColumnSettings from './pages/LocalPickup/PickupColumnSettings'
 import LocalSettings from './pages/LocalSettings'
 import LocalPickupSettings from './pages/LocalSettings/PickupSettings'
 import LocalGeneralSettings from './pages/LocalSettings/GeneralSettings'
@@ -130,6 +131,10 @@ export default function AppRoutes() {
         {/* the STAGING replica of the same page (owner, 2026-09-23): same
             component, `variant="replica"`; `key` remounts it so filters and
             selection never carry over between the two */}
+        {/* SED-14605 (RCBC): the Scan page — one key for all three, so the scanned list survives opening a consignment */}
+        <Route path="/local/pending-for-planning-scan" element={<LocalPendingForPlanning key="scan" variant="scan" />} />
+        <Route path="/local/pending-for-planning-scan/pickup/:prId" element={<LocalPendingForPlanning key="scan" variant="scan" />} />
+        <Route path="/local/pending-for-planning-scan/:id" element={<LocalPendingForPlanning key="scan" variant="scan" />} />
         <Route path="/local/pending-for-planning-replica" element={<LocalPendingForPlanning key="replica" variant="replica" />} />
         <Route path="/local/pending-for-planning-replica/pickup/:prId" element={<LocalPendingForPlanning key="replica" variant="replica" />} />
         <Route path="/local/pending-for-planning-replica/:id" element={<LocalPendingForPlanning key="replica" variant="replica" />} />
@@ -158,6 +163,7 @@ export default function AppRoutes() {
         <Route path="/local/inbound" element={<LocalInbound />} />
         <Route path="/local/inbound/scanner" element={<LocalInboundScanner />} />
         <Route path="/local/columns" element={<LocalColumnConfiguration />} />
+        <Route path="/local/columns/pickup" element={<PickupColumnSettings />} />
         <Route path="/local/settings" element={<LocalSettings />} />
         <Route path="/local/settings/pickup" element={<LocalPickupSettings />} />
         <Route path="/local/settings/masters" element={<LocalMastersHub />} />

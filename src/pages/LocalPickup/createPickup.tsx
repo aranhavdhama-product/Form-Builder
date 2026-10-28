@@ -13,7 +13,7 @@
  * This replaces the console Pickup page's old "Eligible consignments" tab as the place ops book waiting
  * consignments (Consignment Order → Schedule Pickup still does the same from a selection).
  */
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Plus } from 'lucide-react'
 import { Button, Checkbox, Field, Input, MenuSelect, Modal } from '../../nueva/components'
 import { toast } from '../../nueva/toast'
@@ -42,13 +42,38 @@ function useWaitingConsignments(): GrowOrder[] {
   return useMemo(() => db.orders.filter((o) => isPickupEligible(o) && !plan.exceptions[o.id]), [db.orders, plan.exceptions])
 }
 
-/** "Create pickup ▾" — the two choices; a single button when blind pickups are switched off. */
+/** The Pickup page's create button (owner, 2026-10-21): just **Pickup request**. Since 2026-10-22 its modal opens on
+ *  Waiting consignments with Blind pickup as the second choice at the top (`PickupKindSwitch`). */
 export function CreatePickupButton({ onPick }: { onPick: (k: CreatePickupKind) => void }) {
-  const cfg = usePickupModuleConfig()
-  /* ONE button (owner, 2026-10-08: "remove this option"): it opens the Blind pickup request; with blind pickups off it opens
-     the Pickup request for the consignments already waiting */
-  const blind = blindPickupsAllowed(cfg)
-  return <Button icon={<Plus size={15} />} onClick={() => onPick(blind ? 'blind' : 'request')}>{blind ? 'Blind pickup' : 'Create pickup'}</Button>
+  return <Button icon={<Plus size={15} />} onClick={() => onPick('request')}>Pickup request</Button>
+}
+
+/**
+ * The two ways to book, as one choice at the top of the Pickup request modal (owner, 2026-10-22: "blind pickup
+ * functionality should come there"). Blind shows even when Settings turn it off — disabled, with where to turn it on.
+ */
+function PickupKindSwitch({ value, onChange, blindAllowed }: {
+  value: CreatePickupKind; onChange: (k: CreatePickupKind) => void; blindAllowed: boolean
+}) {
+  const card = (k: CreatePickupKind, label: string, hint: string, disabled = false) => (
+    <button type="button" role="radio" aria-checked={value === k} disabled={disabled}
+      title={disabled ? 'Turned off in Settings › Pickup › Book a pickup without consignments' : undefined}
+      onClick={() => onChange(k)}
+      className={`flex-1 rounded-lg border px-3 py-2 text-left transition-colors ${value === k
+        ? 'border-brand-500 bg-brand-50' : 'border-line bg-surface hover:border-ink-3'} ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}>
+      <span className="flex items-center gap-2 text-[14px] font-bold text-ink">
+        <span className={`h-3.5 w-3.5 rounded-full border-2 ${value === k ? 'border-brand-500 bg-brand-500 shadow-[inset_0_0_0_2px_white]' : 'border-ink-3'}`} />
+        {label}
+      </span>
+      <span className="mt-0.5 block pl-[22px] text-[13px] text-ink-3">{disabled ? 'Off in Settings' : hint}</span>
+    </button>
+  )
+  return (
+    <div role="radiogroup" aria-label="What to book" className="mt-3 flex w-full min-w-[min(560px,80vw)] gap-2">
+      {card('request', 'Waiting consignments', 'Book consignments that are ready for a pickup')}
+      {card('blind', 'Blind pickup', 'Book the pickup before the consignments exist', !blindAllowed)}
+    </div>
+  )
 }
 
 /** Mount once per page: renders the popup the button picked. `onCreated` gets every request made. */
@@ -56,23 +81,34 @@ export function CreatePickupDialogs({ kind, onClose, onCreated }: {
   kind: CreatePickupKind | null; onClose: () => void; onCreated: (prs: GrowPickupRequest[]) => void
 }) {
   const cfg = usePickupModuleConfig()
-  if (kind === 'request') return <NewPickupRequestDialog onClose={onClose} onDone={(prs) => { onClose(); onCreated(prs) }} />
-  if (kind === 'blind' && blindPickupsAllowed(cfg)) return (
-    <CreatePickupDialog onClose={onClose}
+  const blindAllowed = blindPickupsAllowed(cfg)
+  /* ONE modal, two forms: the switch under the title flips between them (the button opens it on Waiting consignments) */
+  const [mode, setMode] = useState<CreatePickupKind | null>(null)
+  const open = mode ?? kind
+  if (!open) return null
+  const close = () => { setMode(null); onClose() }
+  const done = (prs: GrowPickupRequest[]) => { setMode(null); onClose(); onCreated(prs) }
+  const switcher = <PickupKindSwitch value={open} onChange={setMode} blindAllowed={blindAllowed} />
+  if (open === 'blind' && blindAllowed) return (
+    <CreatePickupDialog title="New pickup request" subtitle={switcher} onClose={close}
       onDone={(prs) => {
-        onClose()
         toast.success(prs.length === 1 ? `Blind pickup ${prs[0].number} created` : `Blind pickups ${prs.map((p) => p.number).join(', ')} created`)
-        onCreated(prs)
+        done(prs)
       }} />
   )
-  return null
+  return <NewPickupRequestDialog subtitle={switcher} blindAllowed={blindAllowed} onClose={close} onDone={done} />
 }
 
 /**
  * Pickup request — address → consignments → date and time. Nothing else is asked: the hub comes from each
  * consignment, the merchant from the address, the rules (horizon, cut-off, pickup days) from Settings.
  */
-export function NewPickupRequestDialog({ onClose, onDone }: { onClose: () => void; onDone: (prs: GrowPickupRequest[]) => void }) {
+export function NewPickupRequestDialog({ onClose, onDone, subtitle, blindAllowed = false }: {
+  onClose: () => void; onDone: (prs: GrowPickupRequest[]) => void
+  /** the Waiting / Blind switch (CreatePickupDialogs) */
+  subtitle?: ReactNode
+  blindAllowed?: boolean
+}) {
   const db = useGrowOrders()
   const waiting = useWaitingConsignments()
   /* frozen when the popup opens — rows must not vanish under the cursor */
@@ -105,32 +141,38 @@ export function NewPickupRequestDialog({ onClose, onDone }: { onClose: () => voi
   const allOn = rows.length > 0 && chosen.length === rows.length
   const toggleAll = () => setPicked(allOn ? new Set() : new Set(rows.map((o) => o.id)))
 
-  const submit = () => {
+  /* owner, 2026-10-22: "Create pickup request" RAISES it (Pickup Requested); "Save as draft" keeps it Created, to raise later */
+  const submit = (draft = false) => {
     if (!chosen.length || winError) return
     const failed: string[] = []
     const made: BookingOutcome[] = []
     groups.forEach((g) => made.push(...bookGroup(
       { storeCode: g.storeCode, destinationCode: g.destinationCode, orderIds: g.orders.map((o) => o.id), vehicle: g.vehicle },
       { mode: 'new' },
-      { startAt: w.startAt, endAt: w.endAt, instructions: note.trim() || undefined, source: 'Console', merchantCode: merchant },
+      { startAt: w.startAt, endAt: w.endAt, instructions: note.trim() || undefined, source: 'Console', merchantCode: merchant, draft },
       failed)))
     if (failed.length) toast.error(`Not booked: ${failed.join(', ')}`)
-    if (made.length) toast.success(`${plural(made.reduce((n, r) => n + r.count, 0), 'consignment')} booked — ${made.map((r) =>
-      `${r.pr.number}${r.kind === 'merged' ? ' (joined)' : ''}`).join(', ')}`)
+    if (made.length) toast.success(`${plural(made.reduce((n, r) => n + r.count, 0), 'consignment')} ${draft ? 'saved as draft' : 'booked'} — ${made.map((r) =>
+      `${r.pr.number}${r.kind === 'merged' ? ' (joined)' : ''}`).join(', ')}${draft ? ' · raise it when ready' : ''}`)
     onDone(made.map((r) => r.pr))
   }
 
   const requests = groups.length
   return (
-    <Modal open wide title="New pickup request" onClose={onClose}
+    <Modal open wide title="New pickup request" subtitle={subtitle} onClose={onClose}
       footer={<>
         <Button variant="outline" onClick={onClose}>Cancel</Button>
-        <Button onClick={submit} disabled={!chosen.length || !!winError}>
+        <Button variant="outline" onClick={() => submit(true)} disabled={!chosen.length || !!winError}>
+          {requests > 1 ? `Save ${requests} as draft` : 'Save as draft'}
+        </Button>
+        <Button onClick={() => submit()} disabled={!chosen.length || !!winError}>
           {requests > 1 ? `Create ${requests} pickup requests` : 'Create pickup request'}
         </Button>
       </>}>
       {!points.length ? (
-        <p className="pb-6 pt-2 text-[13px] text-ink-3">No consignment is waiting for a pickup right now.</p>
+        <p className="pb-6 pt-2 text-[14px] text-ink-3">
+          No consignment is waiting for a pickup right now.{blindAllowed ? ' Choose Blind pickup above to book one before the consignments exist.' : ''}
+        </p>
       ) : (
         <div className="flex flex-col gap-5 pb-3">
           <div className="grid grid-cols-2 gap-3">

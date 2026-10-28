@@ -7,12 +7,12 @@ import { StatusPill } from '../../nueva/components'
 import type { GrowPickupRequest, PickupRequestStatus } from '../../growOrders/types'
 import { isHandedOver } from '../../growOrders/tabs'
 import { PR_STATUS_TONE, type Tone } from '../LocalPickup/prModel'
-import { PARTIALLY_PICKED, prOutcomeLabel, prOutcomeWords } from './utils'
+import { prOutcomeWords } from './utils'
 import { isInTransitToHub } from './pickupGate'
 
 /** The one status whose full name cannot fit a pill in a narrow column. */
 const SHORT_STATUS: Partial<Record<PickupRequestStatus, string>> = {
-  'Ready For Last Mile Dispatch': 'Ready For Dispatch',
+  'Driver Assigned For Pickup': 'Driver Assigned',
 }
 
 /**
@@ -27,10 +27,9 @@ export function PrStatusChip({ p, short = false, flags = [] }: {
   /** extra pills after the status — the merchant's Overdue · Duplicate · Re-attempt (never Discrepancy) */
   flags?: { label: string; tone: Tone }[]
 }) {
-  const label = prOutcomeLabel(p)
-  const partial = label === PARTIALLY_PICKED
-  const tone: Tone = partial ? 'warning' : PR_STATUS_TONE[p.status]
-  const text = partial ? label : (short && SHORT_STATUS[p.status]) || label
+  /* the STATE, one of the seven (owner, 2026-10-23) — blue · green once picked · red failed / cancelled */
+  const tone: Tone = PR_STATUS_TONE[p.status]
+  const text = (short && SHORT_STATUS[p.status]) || p.status
   const n = p.overages.length
   /* owner, 2026-09-25: ONE status chip per row — the flags (Overdue · Duplicate ·
      Re-attempt …) and an overage count live in the tooltip and on the request page */
@@ -49,7 +48,8 @@ export function PrStatusChip({ p, short = false, flags = [] }: {
  * transit to hub). One short line.
  */
 export function PrExecutionLine({ p }: { p: GrowPickupRequest }) {
-  if (isHandedOver(p)) return <span className="mt-0.5 flex"><StatusPill label="Handed Over" tone="success" /></span>
+  /* a fact under the state, never a second state pill */
+  if (isHandedOver(p)) return <span className="mt-0.5 block truncate text-[12px] text-ink-3">Handed over at the hub</span>
   if (isInTransitToHub(p)) return <span className="mt-0.5 block truncate text-[12px] text-ink-3">In transit to hub</span>
   /* the merchant sees a 3PL's name, never the fleet driver's */
   const who = p.status !== 'Out For Pickup' ? null

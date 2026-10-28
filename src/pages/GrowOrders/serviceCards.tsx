@@ -62,9 +62,33 @@ export function RateCard({ title, left, right, trailing, selected, onClick, iner
 
 /** One service in the grid: a radio, the name and the carrier on the left, the rate on the right (owner, 2026-10-06: no
     transit days on Grow's service cards). */
-function ServiceChoice({ q, carrier, selected, inert, onClick, currency }: {
-  q: ServiceQuote; carrier: string; selected: boolean; inert: boolean; onClick: () => void; currency: string
+export function ServiceChoice({ q, carrier, selected, inert, onClick, currency, eta, compact = false, price = true }: {
+  q: Pick<ServiceQuote, 'code' | 'name' | 'net' | 'days'>; carrier: string; selected: boolean; inert: boolean; onClick: () => void; currency: string
+  /** the estimated delivery under the rate (owner, 2026-10-27: the one-page Grow form — the Grow team's service cards) */
+  eta?: boolean
+  /** owner, 2026-10-28 (the Services cards): radio + name on the left, the price over "Est. n days" on the right — no carrier line */
+  compact?: boolean
+  /** show the price (the form builder decides it per form) */
+  price?: boolean
 }) {
+  if (compact) return (
+    <div role="radio" aria-checked={selected} aria-disabled={inert || undefined} tabIndex={inert ? -1 : 0} onClick={inert ? undefined : onClick}
+      onKeyDown={(e) => { if (!inert && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick() } }}
+      className={`flex min-h-[64px] min-w-0 items-center gap-4 rounded-lg border bg-surface px-5 py-3 text-left transition-colors
+        focus:outline-none focus-visible:ring-[3px] focus-visible:ring-brand-500/20
+        ${selected ? 'cursor-pointer border-ink bg-warm-50' : inert ? 'cursor-default border-line opacity-60' : 'cursor-pointer border-line hover:border-warm-400'}`}>
+      <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${selected ? 'border-brand-500' : 'border-warm-400'}`}>
+        {selected && <span className="h-2.5 w-2.5 rounded-full bg-brand-500" />}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[15px] font-bold leading-6 text-ink">{q.name}</span>
+      {!inert && (price || eta) && (
+        <span className="shrink-0 text-right">
+          {price && q.net > 0 && <span className="block text-[14px] font-bold leading-5 tabular-nums text-ink">{money(q.net, currency)}</span>}
+          {eta && q.days > 0 && <span className="block text-[14px] font-bold leading-5 text-ink-2">Est. {q.days} day{q.days === 1 ? '' : 's'}</span>}
+        </span>
+      )}
+    </div>
+  )
   return (
     <div role="radio" aria-checked={selected} aria-disabled={inert || undefined} tabIndex={inert ? -1 : 0} onClick={inert ? undefined : onClick}
       onKeyDown={(e) => { if (!inert && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick() } }}
@@ -82,6 +106,7 @@ function ServiceChoice({ q, carrier, selected, inert, onClick, currency }: {
       </span>
       <span className="shrink-0 text-right">
         <span className="block text-[15px] font-bold leading-6 tabular-nums text-ink">{inert ? '' : money(q.net, currency)}</span>
+        {eta && !inert && <span className="block text-[13px] text-ink-3">ETA {q.days} day{q.days === 1 ? '' : 's'} (est.)</span>}
       </span>
     </div>
   )
@@ -90,8 +115,14 @@ function ServiceChoice({ q, carrier, selected, inert, onClick, currency }: {
 /** The body of the Grow form's Service Type card (the card itself is the form's own — AddConsignmentV2 merchant mode). */
 export function ServiceTypeChooser({
   ready, mode, onMode, modeLocked, quotes, selected, onSelect, currency, fleet, counts, onCount, fleetNote,
-  showErrors, serviceLocked, children, hideMode, layout = 'list', carrier = '', servicesHidden = false, vehiclesElsewhere = false,
+  showErrors, serviceLocked, children, hideMode, layout = 'list', carrier = '', servicesHidden = false, vehiclesElsewhere = false, eta = false,
+  compact = false, price = true,
 }: {
+  /** the Services cards (owner, 2026-10-28): two a row, radio + name, price over "Est. n days" — and whether the price shows */
+  compact?: boolean
+  price?: boolean
+  /** show each service's estimated delivery days (opt-in — the one-page Grow form) */
+  eta?: boolean
   /** the vehicles are booked in their own card (the form's Vehicle Details, owner 2026-10-06) — no steppers here */
   vehiclesElsewhere?: boolean
   /** Service Type is hidden on the form: no service list (the default is booked) — only a full vehicle's vehicles show */
@@ -184,9 +215,9 @@ export function ServiceTypeChooser({
             ) : grid ? (
               /* inside the form's own card (hideMode) the cards sit on it directly — no second frame */
               <div className={hideMode ? '' : 'mt-4 rounded-xl border border-line p-5'}>
-                <div className="grid gap-2.5" role="radiogroup" aria-label="Service Type">
+                <div className={`grid gap-2.5 ${eta || compact ? 'lg:grid-cols-2' : ''}`} role="radiogroup" aria-label="Service Type">
                   {quotes.map((q) => (
-                    <ServiceChoice key={q.code} q={q} carrier={carrier} currency={currency} selected={ready && q.code === selected} inert={!ready}
+                    <ServiceChoice key={q.code} q={q} carrier={carrier} currency={currency} eta={eta} compact={compact} price={price} selected={ready && q.code === selected} inert={!ready}
                       onClick={() => pick(q.code)} />
                   ))}
                 </div>

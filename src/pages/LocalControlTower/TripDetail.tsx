@@ -319,7 +319,7 @@ function CompleteStopModal({ trip, stop, onClose }: { trip: LocalTrip; stop: Pla
       planningActions.completePickupStop(trip.id, pr.id, scanned)
     }
     const after = pickupRequestById(pr.id)
-    if (after?.status === 'Completed') {
+    if (after?.status === 'Pickedup') {
       const n = after.pickedOrderIds.filter((i) => pr.orderIds.includes(i)).length
       toast.success(`${pr.number} completed — ${n} of ${pr.orderIds.length} collected${extras.length ? ` + ${extras.length} extra` : ''}.`)
     } else {

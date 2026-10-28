@@ -69,7 +69,7 @@ export const pickupPointOf = (pr: GrowPickupRequest, stores: StoreLocation[]) =>
 /** When the collection closed: the FIRST Completed event (later notes — a hub
  *  scan, a forward — are stamped with the same status), else the first driver scan. */
 export function pickedAtOf(pr: GrowPickupRequest): string | null {
-  const done = pr.statusHistory.find((e) => e.status === 'Completed')
+  const done = pr.statusHistory.find((e) => e.status === 'Pickedup')
   return done?.at ?? pr.handover.scanLog.find((s) => s.by === 'driver')?.at ?? null
 }
 
@@ -92,7 +92,7 @@ export function inboundRows(db: GrowOrdersDb, trips: LocalTrip[]): InboundRow[] 
       /* the truck reached the hub at debrief (`arrivedAtHubAt`) — from then on a
          missing hub scan is a discrepancy, not a parcel still en route */
       const debriefed = !!pr.handover.arrivedAtHubAt || trip?.status === 'Completed'
-      const onRoad = !debriefed && (trip ? trip.status === 'In Transit' || trip.status === 'Yet to debrief' : pr.status === 'Completed')
+      const onRoad = !debriefed && (trip ? trip.status === 'In Transit' || trip.status === 'Yet to debrief' : pr.status === 'Pickedup')
       if (onRoad || debriefed) {
         for (const oid of collected) {
           const o = orderOf(oid)

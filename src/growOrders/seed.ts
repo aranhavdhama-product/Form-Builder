@@ -101,7 +101,9 @@ function prOrder(i: number, code: string, o: Partial<GrowOrder> = {}): GrowOrder
  */
 function prHistory(status: PickupRequestStatus, createdAt: string): PickupStatusEvent[] {
   const i = PR_FLOW.indexOf(status)
-  const chain = i >= 0 ? PR_FLOW.slice(0, i + 1) : ([PR_ENTRY_STATUS, status] as PickupRequestStatus[])
+  /* a seeded request was RAISED (Pickup Requested first) — only a draft has a Created step (owner, 2026-10-23) */
+  const chain = status === 'Created' ? ['Created' as const]
+    : i >= 0 ? PR_FLOW.slice(1, i + 1) : ([PR_ENTRY_STATUS, status] as PickupRequestStatus[])
   const t0 = new Date(createdAt).getTime()
   return chain.map((s, n) => ({ status: s, at: new Date(t0 + n * 45 * 60_000).toISOString() }))
 }
@@ -345,41 +347,42 @@ function bulkVolume(): { orders: GrowOrder[]; pickupRequests: GrowPickupRequest[
   const ids = (prId: string) => orders.filter((o) => o.pickupRequestId === prId).map((o) => o.id)
   const rel = ['g600', 'g601', 'g602']
 
-  /* 12 more requests: every status, 3 MULTI-DAY windows, 2 overdue, a duplicate pair */
+  /* 12 more requests: every status (PR-000132 is the draft), 3 MULTI-DAY windows, 2 overdue, a duplicate pair */
   const pickupRequests: GrowPickupRequest[] = [
-    prAt(122, 'SANPABLO', at(1, '14:00'), at(1, '17:00'), 'Requested', ids('pr122'), 1, 'Dock 2 — ring the bell.'),
+    prAt(122, 'SANPABLO', at(1, '14:00'), at(1, '17:00'), 'Pickup Requested', ids('pr122'), 1, 'Dock 2 — ring the bell.'),
     /* a 2-DAY collection window: the driver may come any time across two days */
-    prAt(123, 'MNL-01', at(6, '14:00'), at(8, '18:00'), 'Requested', ids('pr123'), 2, 'Stock is released in two batches.'),
-    prAt(124, 'CEB-01', at(2, '09:00'), at(2, '12:00'), 'Planned', ids('pr124'), 2),
+    prAt(123, 'MNL-01', at(6, '14:00'), at(8, '18:00'), 'Pickup Requested', ids('pr123'), 2, 'Stock is released in two batches.'),
+    prAt(124, 'CEB-01', at(2, '09:00'), at(2, '12:00'), 'Pickup Requested', ids('pr124'), 2),
     /* a 3-DAY window over the weekend */
-    prAt(125, 'SANPABLO', at(8, '08:00'), at(11, '17:00'), 'Assigned', ids('pr125'), 3, 'Weekend consolidation run.'),
+    prAt(125, 'SANPABLO', at(8, '08:00'), at(11, '17:00'), 'Driver Assigned For Pickup', ids('pr125'), 3, 'Weekend consolidation run.'),
     prAt(126, 'MNL-01', at(0, '06:00'), at(0, '13:00'), 'Out For Pickup', ids('pr126'), 3),
-    prAt(127, 'CEB-01', at(-12, '09:00'), at(-12, '13:00'), 'Completed', ids('pr127'), 14),
-    prAt(128, 'SANPABLO', at(-18, '13:00'), at(-18, '17:00'), 'Completed', ids('pr128'), 20),
+    prAt(127, 'CEB-01', at(-12, '09:00'), at(-12, '13:00'), 'Pickedup', ids('pr127'), 14),
+    prAt(128, 'SANPABLO', at(-18, '13:00'), at(-18, '17:00'), 'Pickedup', ids('pr128'), 20),
     prAt(129, 'MNL-01', at(-9, '09:00'), at(-9, '13:00'), 'Pickup Failed', [rel[0], rel[1]], 10, 'Nobody at the loading bay.'),
     prAt(130, 'CEB-01', at(-7, '17:00'), at(-7, '20:00'), 'Cancelled', [rel[2]], 8),
     /* overdue: still open, window closed days ago */
-    prAt(131, 'MNL-01', at(-3, '09:00'), at(-3, '13:00'), 'Requested', ids('pr131'), 4),
-    /* back-to-back with 133 (half-open windows), so NOT a duplicate — PR-000112/113 is the one intended pair */
-    prAt(132, 'SANPABLO', at(4, '09:00'), at(4, '14:00'), 'Requested', ids('pr132'), 1),
-    prAt(133, 'SANPABLO', at(4, '14:00'), at(4, '17:00'), 'Requested', ids('pr133'), 1),
+    prAt(131, 'MNL-01', at(-3, '09:00'), at(-3, '13:00'), 'Pickup Requested', ids('pr131'), 4),
+    /* back-to-back with 133 (half-open windows), so NOT a duplicate — PR-000112/113 is the one intended pair.
+       A DRAFT (Created, owner 2026-10-22): saved, not raised — "Raise pickup request" makes it Pickup Requested. */
+    prAt(132, 'SANPABLO', at(4, '09:00'), at(4, '14:00'), 'Created', ids('pr132'), 1),
+    prAt(133, 'SANPABLO', at(4, '14:00'), at(4, '17:00'), 'Pickup Requested', ids('pr133'), 1),
     /* the trip-run requests — stops on T10000333 / T10000334 */
-    prAt(134, 'SANPABLO', at(0, '08:00'), at(0, '11:00'), 'Completed', ids('pr134'), 1),
-    prAt(135, 'MNL-01', at(-1, '09:00'), at(-1, '12:00'), 'Completed', ids('pr135'), 2),
+    prAt(134, 'SANPABLO', at(0, '08:00'), at(0, '11:00'), 'Pickedup', ids('pr134'), 1),
+    prAt(135, 'MNL-01', at(-1, '09:00'), at(-1, '12:00'), 'Pickedup', ids('pr135'), 2),
     { ...prAt(136, 'MNL-01', at(-1, '13:00'), at(-1, '16:00'), 'Pickup Failed', ['g804', 'g805'], 2),
       failureReason: 'SHIPMENT_NOT_READY' },
     /* 136's automatic re-attempt (autoRescheduleOnFail): the next business day,
        a morning window clear of PR-000102 / 115 at the same point (no Duplicate) */
-    prAt(137, 'MNL-01', at(1, '09:00'), at(1, '12:00'), 'Requested', ids('pr137'), 0),
+    prAt(137, 'MNL-01', at(1, '09:00'), at(1, '12:00'), 'Pickup Requested', ids('pr137'), 0),
     /* g507's dedicated vehicle run, handed over with PR-000127's */
     (() => {
       const g = orders.find((o) => o.id === 'g507')
-      return { ...prAt(139, 'CEB-01', at(-12, '13:00'), at(-12, '17:00'), 'Completed', ids('pr139'), 14),
+      return { ...prAt(139, 'CEB-01', at(-12, '13:00'), at(-12, '17:00'), 'Pickedup', ids('pr139'), 14),
         shipmentType: 'FTL' as const, vehicleType: g?.vehicleType || null, vehicleUnit: 1, ftlServiceType: 'Inland FTL', shipTo: g?.receiver ?? null }
     })(),
     /* 129's automatic re-attempt (attempt 2 of 3), two days out — clear of
        PR-000102 / 115 / 137 at the same point (no Duplicate) */
-    prAt(140, 'MNL-01', at(2, '09:00'), at(2, '13:00'), 'Requested', ids('pr140'), 0),
+    prAt(140, 'MNL-01', at(2, '09:00'), at(2, '13:00'), 'Pickup Requested', ids('pr140'), 0),
   ]
   return { orders, pickupRequests }
 }
@@ -717,78 +720,78 @@ export function seed(): GrowOrdersDb {
      ONE inbound hub, and no vehicle order sits inside a parcel request. */
   const pickupRequests: GrowPickupRequest[] = [
     /* the AUTO-raised request: four consignments, one point, one slot, one hub (the module's default window) */
-    { ...pr(141, cebu.code, autoDate, PICKUP_SLOTS[0], 'Requested', ['o60', 'o61', 'o62', 'o63'], 0,
+    { ...pr(141, cebu.code, autoDate, PICKUP_SLOTS[0], 'Pickup Requested', ['o60', 'o61', 'o62', 'o63'], 0,
         'Raised automatically — consignments reached Ready To Ship.'),
       startAt: autoWin.startAt, endAt: autoWin.endAt, slot: slotFrom(autoWin.startAt, autoWin.endAt),
       createdAt: minutesAgo(22), statusHistory: [
-        { status: 'Requested', at: minutesAgo(22), note: 'Auto pickup · after Ready To Ship · AUTO8T2AUTO04' },
-        { status: 'Requested', at: minutesAgo(4), note: 'Merged AUTO1K7AUTO01, AUTO2P3AUTO02, AUTO5R9AUTO03 — same point, same slot' },
+        { status: 'Pickup Requested', at: minutesAgo(22), note: 'Auto pickup · after Ready To Ship · AUTO8T2AUTO04' },
+        { status: 'Pickup Requested', at: minutesAgo(4), note: 'Merged AUTO1K7AUTO01, AUTO2P3AUTO02, AUTO5R9AUTO03 — same point, same slot' },
       ] },
-    pr(101, sanPablo.code, pickupDate, PICKUP_SLOTS[0], 'Requested', ['o4', 'o41'], 1, 'Dock 2 — ask for the dispatch desk.'),
+    pr(101, sanPablo.code, pickupDate, PICKUP_SLOTS[0], 'Pickup Requested', ['o4', 'o41'], 1, 'Dock 2 — ask for the dispatch desk.'),
     /* o9's dedicated vehicle booking — FTL never rides inside a parcel request.
        The evening slot keeps it clear of PR-000101 / 122 at the same point (no Duplicate). */
-    { ...pr(138, sanPablo.code, pickupDate, PICKUP_SLOTS[2], 'Requested', ['o9'], 1, 'Two trucks — 8 Ton loads first.'),
+    { ...pr(138, sanPablo.code, pickupDate, PICKUP_SLOTS[2], 'Pickup Requested', ['o9'], 1, 'Two trucks — 8 Ton loads first.'),
       shipmentType: 'FTL', vehicleType: '8 Ton Truck', vehicleUnit: 2, ftlServiceType: 'Inland FTL', shipTo: RCV[2] },
-    pr(102, 'MNL-01', daysFromNow(1), PICKUP_SLOTS[1], 'Requested', ['o10', 'o11'], 1),
+    pr(102, 'MNL-01', daysFromNow(1), PICKUP_SLOTS[1], 'Pickup Requested', ['o10', 'o11'], 1),
     /* an OVERNIGHT window — the end lands on the following day */
-    pr(103, 'CEB-01', daysFromNow(2), '21:00–02:00', 'Requested', ['o12'], 2, 'Call the warehouse 30 min ahead.'),
+    pr(103, 'CEB-01', daysFromNow(2), '21:00–02:00', 'Pickup Requested', ['o12'], 2, 'Call the warehouse 30 min ahead.'),
     /* today's open requests end late in the evening, so a demo run in the
        afternoon still reads them as live rather than Overdue */
     /* Requested, not Ready For Last Mile Dispatch: a request past Requested is on
        a trip (or with a carrier), and this one is on neither */
-    pr(104, sanPablo.code, daysFromNow(0), '17:00–23:30', 'Requested', ['o13', 'o14'], 2),
-    pr(105, 'MNL-01', daysFromNow(0), '13:00–23:30', 'Assigned', ['o15'], 3),
+    pr(104, sanPablo.code, daysFromNow(0), '17:00–23:30', 'Pickup Requested', ['o13', 'o14'], 2),
+    pr(105, 'MNL-01', daysFromNow(0), '13:00–23:30', 'Driver Assigned For Pickup', ['o15'], 3),
     pr(106, 'CEB-01', daysFromNow(0), '09:00–23:30', 'Out For Pickup', ['o16', 'o17'], 3),
     /* RECONCILED — the one completed handover that did not go to plan: three of
        four booked orders collected, one order that belonged to PR-000109 handed
        over anyway, and two barcodes that matched nothing at all */
-    { ...pr(107, sanPablo.code, daysFromNow(-3), PICKUP_SLOTS[0], 'Completed', ['o18', 'o29', 'o30', 'o31', 'o35'], 5),
+    { ...pr(107, sanPablo.code, daysFromNow(-3), PICKUP_SLOTS[0], 'Pickedup', ['o18', 'o29', 'o30', 'o31', 'o35'], 5),
       pickedOrderIds: ['o18', 'o29', 'o31', 'o33'], overages: OVERAGES_107 },
     pr(108, 'MNL-01', daysFromNow(-4), PICKUP_SLOTS[1], 'Pickup Failed', ['o19'], 6, 'Location closed on arrival.'),
     /* the OTHER side of the same story: its own order went out on the earlier
        PR-000107 run, and it collected one of PR-000107's leftovers instead */
-    { ...pr(109, sanPablo.code, daysFromNow(-1), PICKUP_SLOTS[2], 'Completed', ['o33'], 4, 'Second van of the week.'),
+    { ...pr(109, sanPablo.code, daysFromNow(-1), PICKUP_SLOTS[2], 'Pickedup', ['o33'], 4, 'Second van of the week.'),
       pickedOrderIds: ['o35'] },
     /* overdue: open, but the window closed days ago */
-    pr(110, sanPablo.code, daysFromNow(-2), PICKUP_SLOTS[0], 'Requested', ['o21'], 4),
-    pr(111, 'MNL-01', daysFromNow(-5), PICKUP_SLOTS[1], 'Requested', ['o22'], 7),
+    pr(110, sanPablo.code, daysFromNow(-2), PICKUP_SLOTS[0], 'Pickup Requested', ['o21'], 4),
+    pr(111, 'MNL-01', daysFromNow(-5), PICKUP_SLOTS[1], 'Pickup Requested', ['o22'], 7),
     /* duplicate: same store + date + slot, both still open */
-    pr(112, sanPablo.code, daysFromNow(2), PICKUP_SLOTS[1], 'Requested', ['o23'], 1),
-    pr(113, sanPablo.code, daysFromNow(2), PICKUP_SLOTS[1], 'Requested', ['o24'], 1),
+    pr(112, sanPablo.code, daysFromNow(2), PICKUP_SLOTS[1], 'Pickup Requested', ['o23'], 1),
+    pr(113, sanPablo.code, daysFromNow(2), PICKUP_SLOTS[1], 'Pickup Requested', ['o24'], 1),
     /* reserved: booked ahead of the orders — nothing attached yet */
-    blindPr(114, 'CEB-01', daysFromNow(3), PICKUP_SLOTS[1], 'Requested', [], 1, {
+    blindPr(114, 'CEB-01', daysFromNow(3), PICKUP_SLOTS[1], 'Pickup Requested', [], 1, {
       pieces: 12, weight: 40, sizeClass: 'Pallet',
       instructions: 'Pallet jack needed — goods are shrink-wrapped on one pallet.',
       note: 'Warehouse promised the stock transfer by Tuesday.',
     }),
     /* reserved + FTL: a dedicated truck booked before the vehicle order exists */
-    blindPr(116, sanPablo.code, daysFromNow(3), PICKUP_SLOTS[0], 'Requested', [], 1, {
+    blindPr(116, sanPablo.code, daysFromNow(3), PICKUP_SLOTS[0], 'Pickup Requested', [], 1, {
       shipmentType: 'FTL', pieces: 14, weight: 6400, vehicleType: '8 Ton Truck', vehicleUnit: 1,
       shipTo: RCV[2],
       instructions: 'Driver to report to the weighbridge before loading.',
       note: 'Stock is being consolidated — the vehicle order follows.',
     }),
     /* more reserved FTL examples — Ship To unknown, multi-vehicle, overnight window, custom pickup point */
-    blindPr(119, 'CEB-01', daysFromNow(2), PICKUP_SLOTS[1], 'Requested', [], 1, {
+    blindPr(119, 'CEB-01', daysFromNow(2), PICKUP_SLOTS[1], 'Pickup Requested', [], 1, {
       shipmentType: 'FTL', pieces: 20, weight: 12000, vehicleType: '14 Ton Truck', vehicleUnit: 2,
       shipTo: null,
       instructions: 'Two trucks — load the export cartons first.',
       note: 'Destination depends on which distributor confirms; Ship To to be added.',
     }),
-    blindPr(120, 'MNL-01', daysFromNow(1), '21:00–02:00', 'Assigned', [], 3, {
+    blindPr(120, 'MNL-01', daysFromNow(1), '21:00–02:00', 'Driver Assigned For Pickup', [], 3, {
       shipmentType: 'FTL', pieces: 30, weight: 28000, vehicleType: 'Superlink (34 Ton)', vehicleUnit: 1,
       shipTo: RCV[4],
       instructions: 'Night loading — security gate 3, driver needs a gate pass.',
       note: 'Interisland trip to Cebu; overnight window agreed with the hub.',
     }),
-    blindPr(121, sanPablo.code, daysFromNow(-4), PICKUP_SLOTS[0], 'Completed', ['o36'], 6, {
+    blindPr(121, sanPablo.code, daysFromNow(-4), PICKUP_SLOTS[0], 'Pickedup', ['o36'], 6, {
       shipmentType: 'FTL', pieces: 8, weight: 5200, vehicleType: 'Refrigerated 8 Ton', vehicleUnit: 1,
       shipFrom: RCV[1], shipTo: RCV[3],
       instructions: 'Reefer must be pre-cooled to 4°C before loading.',
       note: 'Picked up from the co-packer, not from the hub.',
     }),
     /* reserved: four of the six expected orders have since been attached */
-    blindPr(115, 'MNL-01', daysFromNow(1), PICKUP_SLOTS[2], 'Requested', ['o25', 'o26', 'o27', 'o28'], 2, {
+    blindPr(115, 'MNL-01', daysFromNow(1), PICKUP_SLOTS[2], 'Pickup Requested', ['o25', 'o26', 'o27', 'o28'], 2, {
       pieces: 6, weight: 14, sizeClass: 'Medium box',
       note: 'Two more orders still being packed.',
     }),
@@ -813,7 +816,7 @@ export function seed(): GrowOrdersDb {
     /* a COMPLETED request with no reconciliation recorded means the ordinary case —
        the driver collected everything that was booked. Only the requests that
        deliberately tell a different story (107, 109) carry their own list. */
-    .map((p) => (p.status === 'Completed' && p.pickedOrderIds.length === 0
+    .map((p) => (p.status === 'Pickedup' && p.pickedOrderIds.length === 0
       ? { ...p, pickedOrderIds: [...p.orderIds] }
       : p))
     .map(withExecution)

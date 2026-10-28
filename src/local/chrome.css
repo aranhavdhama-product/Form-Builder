@@ -159,6 +159,10 @@
 .pfp-daterange .lc-date-half { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pfp-daterange .lc-date-half[data-empty='true'] { color: rgba(0, 0, 0, 0.25); }
 .pfp-daterange input::placeholder { color: rgba(0, 0, 0, 0.25); }
+/* a longer placeholder ("Pickup Planning date") gets room for its first half */
+.pfp-daterange[data-wide] { width: 290px; }
+.pfp-daterange[data-wide] input:first-of-type,
+.pfp-daterange[data-wide] .lc-date-half:first-child { width: 140px; }
 .pfp-daterange .pfp-daterange-sep { color: rgba(0, 0, 0, 0.25); display: inline-flex; }
 .pfp-daterange .pfp-daterange-icon { color: rgba(0, 0, 0, 0.25); margin-left: auto; display: inline-flex; background: none; border: 0; padding: 0; }
 

@@ -847,16 +847,101 @@
 .pfp-tabs { display: flex; gap: var(--pfp-filter-gap); margin-bottom: var(--pfp-pad-x); }
 
 /* staging's filter row: 12px between controls, Quick Filter at the right edge */
-.pfp[data-variant='replica'] .pfp-filters { gap: var(--pfp-filter-gap); }
-.pfp[data-variant='replica'] .pfp-filters > .pfp-quick { margin-left: auto; white-space: nowrap; }
+.pfp:is([data-variant='replica'], [data-variant='scan']) .pfp-filters { gap: var(--pfp-filter-gap); }
+.pfp:is([data-variant='replica'], [data-variant='scan']) .pfp-filters > .pfp-quick { margin-left: auto; white-space: nowrap; }
 
 /* the two 576px cards + 16 gap are 16px wider than the 1152 content box —
    let them share the width rather than scroll the page sideways */
-.pfp[data-variant='replica'] .pfp-strip:not([data-quick]) > .pfp-card { flex: 0 1 576px; }
+.pfp:is([data-variant='replica'], [data-variant='scan']) .pfp-strip:not([data-quick]) > .pfp-card { flex: 0 1 576px; }
 
 /* the stat strip may give up width before anything else on the toolbar */
-.pfp[data-variant='replica'] .pfp-toolbar > .pfp-stats { flex: 0 1 486px; min-width: 0; }
-.pfp[data-variant='replica'] .pfp-toolbar > .pfp-hint { overflow: hidden; }
+.pfp:is([data-variant='replica'], [data-variant='scan']) .pfp-toolbar > .pfp-stats { flex: 0 1 486px; min-width: 0; }
+.pfp:is([data-variant='replica'], [data-variant='scan']) .pfp-toolbar > .pfp-hint { overflow: hidden; }
 
 /* the selection panel opens below the toolbar, clear of its icons */
 .pfp-toolbar > .pfp-panel { top: calc(100% + 8px); }
+
+
+/* ------------------------------------------ variant="scan" (SED-14605, 2026-10-21) --
+ * `/local/pending-for-planning-scan` wears production's chrome (the replica's
+ * rows, above). Its own pieces: the scan field + Clear where production has
+ * Search, the one-line readouts production shows, and the scan line under the
+ * toolbar. Status tones are the app's own tokens.
+ */
+/* the scan field — production's search box, turning brand while a scan is on; "✕ Clear (n)" (clear + count, one control) sits
+   inside its right end behind a hairline, neutral grey so it never reads as a second Clear Filters, red on hover */
+.pfp-scanbox {
+  display: flex; align-items: center; gap: 8px;
+  flex: 0 1 340px; min-width: 240px; height: 36px; padding: 0 4px 0 12px; margin-right: 8px;
+  background: var(--pfp-surface); border: 1px solid var(--pfp-line); border-radius: 10px;
+  color: rgb(76, 87, 97);
+}
+.pfp-scanbox[data-active], .pfp-scanbox:focus-within { border-color: var(--pfp-brand); }
+.pfp-scanbox > svg { flex: none; }
+.pfp-scanbox input { flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: 14px; color: var(--pfp-ink); }
+.pfp-scanbox-clear {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 10px;
+  border: 0; border-left: 1px solid var(--pfp-line); border-radius: 0 8px 8px 0; background: transparent;
+  font-size: 14px; font-weight: 500; color: var(--pfp-ink-body); white-space: nowrap; cursor: pointer;
+}
+.pfp-scanbox-clear:hover { color: var(--color-danger-fg); background: var(--color-danger-bg); }
+.pfp[data-variant='scan'] .pfp-toolbar > .pfp-stats { flex: 0 0 auto; width: auto; margin-left: auto; padding-left: 16px; }
+.pfp-stats[data-inline] { gap: 14px; }
+.pfp-stats[data-inline] > div { display: flex; align-items: baseline; gap: 6px; }
+.pfp-stats[data-inline] .pfp-stat-value { margin-top: 0; }
+
+.pfp-scanbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--pfp-ink);
+}
+.pfp-scanbar-note { color: var(--pfp-ink-hint); }
+.pfp-scanbar-spacer { flex: 1 1 auto; }
+.pfp-scanmsg {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--color-danger-bg);
+  color: var(--color-danger-fg);
+}
+.pfp-scanmsg[data-tone='success'] { background: var(--color-success-bg); color: var(--color-success-fg); }
+.pfp-scanmsg[data-tone='warning'] { background: var(--color-warning-bg); color: var(--color-warning-fg); }
+.pfp-scanbar + .pfp-tablewrap { margin-top: 12px; }
+/* production's footer Refresh (right of the pager) */
+.pfp-refresh {
+  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px;
+  border: 1px solid var(--pfp-line-table); border-radius: 8px; background: var(--pfp-surface);
+  font-size: 16px; color: var(--pfp-ink); cursor: pointer;
+}
+.pfp-refresh:hover { border-color: var(--pfp-brand); }
+
+
+/* ------------------------------------------ View Pickup (owner, 2026-10-22) --
+ * The figures a planner reads first, above the details; and the pickup's consignment / package numbers as chips.
+ */
+.pfp-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.pfp-kpis > * {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px 16px; text-align: left;
+  background: var(--pfp-surface); border: 1px solid var(--pfp-line); border-radius: 10px; font: inherit;
+}
+.pfp-kpis span { font-size: 12px; color: var(--pfp-ink-hint); }
+.pfp-kpis b { font-size: 18px; font-weight: 700; color: var(--pfp-ink); font-variant-numeric: tabular-nums; }
+.pfp-kpis > button { cursor: pointer; }
+.pfp-kpis > button:disabled { cursor: default; }
+.pfp-kpis > button:not(:disabled):hover { border-color: var(--pfp-brand); }
+.pfp-kpis > button:not(:disabled) b { color: var(--pfp-brand); }
+.pfp-numchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pfp-numchip {
+  display: inline-flex; align-items: center; height: 26px; padding: 0 8px; border-radius: 6px;
+  background: var(--pfp-surface-alt, #f3f4f6); border: 1px solid var(--pfp-line);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 600; color: var(--pfp-ink);
+}
+.pfp-numchip[data-more] { font-family: inherit; color: var(--pfp-brand); cursor: pointer; background: transparent; }
+@media (max-width: 900px) { .pfp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

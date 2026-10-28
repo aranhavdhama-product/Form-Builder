@@ -294,9 +294,9 @@ export function eventsOf(
  */
 
 /** Pickup statuses a merchant sees as a milestone (planning steps are internal). */
-const MERCHANT_PICKUP_STATUSES = new Set(['Requested', 'Out For Pickup', 'Completed', 'Pickup Failed', 'Cancelled'])
+const MERCHANT_PICKUP_STATUSES = new Set(['Pickup Requested', 'Out For Pickup', 'Pickedup', 'Pickup Failed', 'Cancelled'])
 const MERCHANT_PICKUP_LABEL: Record<string, string> = {
-  Requested: 'Pickup Scheduled', 'Out For Pickup': 'Out For Pickup', Completed: 'Picked Up',
+  'Pickup Requested': 'Pickup Scheduled', 'Out For Pickup': 'Out For Pickup', Pickedup: 'Picked Up',
   'Pickup Failed': 'Pickup Failed', Cancelled: 'Pickup Cancelled',
 }
 /** Consignment events a merchant sees; everything else in `eventsOf` is ops bookkeeping. */

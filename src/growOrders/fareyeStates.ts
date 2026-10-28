@@ -19,7 +19,7 @@
  *   RTO_INITIATED · RTO_IN_PROGRESS (also DRIVER_ASSIGNED_FOR_RTO) · RTO_DRIVER_OUT (OUT_FOR_RTO)   –
  *   RTO_COMPLETED · CANCELLED · LOST   –
  *
- * (A PICKUP REQUEST has its own statuses — Requested · Planned · Assigned … — which are NOT consignment states.)
+ * (A PICKUP REQUEST has its own statuses — Created (draft) · Pickup Requested · Planned · Assigned … — which are NOT consignment states.)
  * Pure module: nothing from src/auth, no React.
  */
 

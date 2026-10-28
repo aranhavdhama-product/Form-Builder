@@ -89,7 +89,7 @@ export default function ConsignmentOrderSettings() {
   const noColumns = draft.enabled && draft.tableColumns.length === 0
 
   /* what the form builder holds today (read once — the builder is another page) */
-  const [formSetup] = useState(() => ({ custom: loadCustomFields().length, growChanges: Object.keys(loadRules('grow')).length }))
+  const [formSetup] = useState(() => ({ custom: loadCustomFields().length, growOff: Object.values(loadRules('grow')).filter((r) => r.hidden).length }))
   const columnLabel = (k: string) => orderViewTitle(k, CONSIGNMENT_COLUMN_LABELS[k] ?? k, viewOnOrder)
   const filterLabel = (k: string) => orderViewTitle(k, CONSIGNMENT_FILTER_LABELS[k] ?? k, viewOnOrder)
   const toggleUserType = (u: string, on: boolean) =>
@@ -178,12 +178,12 @@ export default function ConsignmentOrderSettings() {
             )}
 
             {tab === 4 && (
-              <SectionCard title="Customise the forms" hint="Open a form to rename, require or hide its fields, check what is typed (Format) and add your own fields.">
-                <SettingRow label="Operations form" hint={`What ops see on Add Consignment${formSetup.custom ? ` · ${formSetup.custom} own field${formSetup.custom === 1 ? '' : 's'}` : ''}`}>
-                  <Button variant="outline" onClick={() => navigate('/local/consignments/new?edit=console')}>Edit operations form</Button>
-                </SettingRow>
-                <SettingRow label="Merchant form" hint={`What merchants see on Create Order — follows the operations form${formSetup.growChanges ? ` · ${formSetup.growChanges} field${formSetup.growChanges === 1 ? '' : 's'} changed for Grow` : ' unless you change it for Grow'}`}>
-                  <Button variant="outline" onClick={() => navigate('/local/consignments/new?edit=grow')}>Edit merchant form</Button>
+              <SectionCard title="Customise the forms" hint="One builder for the Ops form and the Grow form: rename, require or hide fields and add your own. Every setting applies to both forms; each field has Show for Ops and Show for Grow.">
+                <SettingRow label="Form builder" hint={`Edit once for both forms, preview the Ops or the Grow form${formSetup.custom ? ` · ${formSetup.custom} own field${formSetup.custom === 1 ? '' : 's'}` : ''}${formSetup.growOff ? ` · ${formSetup.growOff} field${formSetup.growOff === 1 ? '' : 's'} hidden for Grow` : ''}`}>
+                  <span className="inline-flex gap-2">
+                    <Button variant="outline" onClick={() => navigate('/local/consignments/new?edit=console')}>Open form builder</Button>
+                    <Button variant="outline" onClick={() => navigate('/local/consignments/new?edit=grow')}>Preview the Grow form</Button>
+                  </span>
                 </SettingRow>
               </SectionCard>
             )}

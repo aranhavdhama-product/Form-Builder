@@ -10,6 +10,7 @@
  * `sameDayCutoff` is the booking cutoff these rules read — the older
  * `cutoffTime` setting is not consulted here.
  */
+import { PR_CUTOFFS, toCutoff, type PrCutoff } from './types'
 import { configForMerchant, readPickupModuleConfig, type AutoPickupConfig, type PickupModuleConfig } from '../config/pickupModule'
 import { DEFAULT_AUTO_PICKUP_TRIGGER, triggerEventOf, triggerFired, type TriggerSubject } from './fareyeEvents'
 import { pickupCalendarFor, type DayHours, type PickupCalendar, type PickupWhere } from './operatingCalendar'
@@ -28,7 +29,7 @@ export interface PickupPolicy {
   bookingLeadTimeMins: number
   maxAttempts: number
   autoRescheduleOnFail: boolean
-  allowAddToExistingUntil: 'Requested' | 'Planned' | 'Assigned'
+  allowAddToExistingUntil: PrCutoff
   /** 0 = Sunday … 6 = Saturday. */
   businessDays: number[]
   /** "Pickups can be booked up to" N days from today (1–30) — the furthest bookable date. */
@@ -54,7 +55,7 @@ export const DEFAULT_PICKUP_POLICY: PickupPolicy = {
   bookingLeadTimeMins: 120,
   maxAttempts: 3,
   autoRescheduleOnFail: true,
-  allowAddToExistingUntil: 'Planned',
+  allowAddToExistingUntil: 'On a route',
   businessDays: [1, 2, 3, 4, 5, 6],
   bookingHorizonDays: 7,
 }
@@ -86,7 +87,8 @@ function toSlots(v: unknown): SlotDef[] | null {
 export function toPolicy(raw: unknown): PickupPolicy {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const d = DEFAULT_PICKUP_POLICY
-  const until = o.allowAddToExistingUntil
+  /* saved before 2026-10-22 as 'Requested' — the same stage, now 'Pickup Requested' */
+  const until = toCutoff(o.allowAddToExistingUntil)
   /* the shared top-level horizon; a pre-2026-09-25 blob carried it as autoPickup.maxDaysAhead */
   const ap = (o.autoPickup && typeof o.autoPickup === 'object' ? o.autoPickup : {}) as Record<string, unknown>
   const horizon = num(o.bookingHorizonDays, num(ap.maxDaysAhead, d.bookingHorizonDays))
@@ -98,7 +100,7 @@ export function toPolicy(raw: unknown): PickupPolicy {
     bookingLeadTimeMins: Math.max(0, num(o.bookingLeadTimeMins, d.bookingLeadTimeMins)),
     maxAttempts: Math.max(1, Math.round(num(o.maxAttempts, d.maxAttempts))),
     autoRescheduleOnFail: typeof o.autoRescheduleOnFail === 'boolean' ? o.autoRescheduleOnFail : d.autoRescheduleOnFail,
-    allowAddToExistingUntil: until === 'Requested' || until === 'Planned' || until === 'Assigned' ? until : d.allowAddToExistingUntil,
+    allowAddToExistingUntil: (PR_CUTOFFS as readonly unknown[]).includes(until) ? until as PrCutoff : d.allowAddToExistingUntil,
     businessDays: Array.isArray(o.businessDays) && o.businessDays.every((x) => Number.isInteger(x) && x >= 0 && x <= 6)
       ? (o.businessDays as number[]) : d.businessDays,
     bookingHorizonDays: Math.min(30, Math.max(1, Math.round(horizon))),

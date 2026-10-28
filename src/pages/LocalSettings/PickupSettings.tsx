@@ -22,6 +22,7 @@
  * ModuleDetail itself is NOT imported: it pulls settingsApi → the staging proxy, and nothing in the local app may
  * reach the staging proxy or the auth module.
  */
+import { PR_CUTOFFS } from '../../growOrders/types'
 import { useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CalendarClock, ChevronRight, ExternalLink, Play, Workflow } from 'lucide-react'
@@ -150,8 +151,8 @@ const SCAN_LABEL: Record<PickupModuleConfig['scanMode'], string> = {
 }
 const POD_LABEL: Record<PodLevel, string> = { required: 'Required', optional: 'Optional', off: 'Off' }
 const OVERAGE_LABEL: Record<PickupModuleConfig['overagePolicy'], string> = { hold: 'Hold for review', 'auto-create': 'Create an order', reject: 'Reject' }
-const STAGE_LABEL: Record<PickupModuleConfig['merchantCancelUntil'], string> = { Requested: 'It is requested', Planned: 'It is planned', Assigned: 'A driver is assigned' }
-const STAGES = ['Requested', 'Planned', 'Assigned'] as const
+const STAGE_LABEL: Record<PickupModuleConfig['merchantCancelUntil'], string> = { 'Pickup Requested': 'It is requested', 'On a route': 'It is on a route', 'Driver Assigned For Pickup': 'A driver is assigned' }
+const STAGES = PR_CUTOFFS
 
 /* ---------- page ---------- */
 

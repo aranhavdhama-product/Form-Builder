@@ -39,8 +39,8 @@ import { prTypeLabel } from '../LocalPickup/prModel'
 import { SplitPickupDialog } from '../LocalPickup/bookingCards'
 import { prActionState, type PrAction } from '../../growOrders/prActions'
 import {
-  PARTIALLY_PICKED, PR_STATUS_TONE, STATUS_TONE, fmtAt, fmtDate, fmtDateTime, partyLine, pickupOutcome,
-  pickupPointAddress, pickupPointName, pillTone, prExtraOrders, prOrders, prOutcomeLabel, prOutcomeWords,
+  PR_STATUS_TONE, STATUS_TONE, fmtAt, fmtDate, fmtDateTime, partyLine, pickupOutcome,
+  pickupPointAddress, pickupPointName, pillTone, prExtraOrders, prOrders, prOutcomeWords,
   prOverdue, prReconciled, prWindow, prWindowStarted,
 } from './utils'
 
@@ -88,12 +88,11 @@ function Notice({ children, action }: { children: ReactNode; action?: ReactNode 
 
 /** The outcome-aware status pill (`Partially picked`, `+n` overage badge) — the grid speaks the same words. */
 function PrStatus({ pr }: { pr: GrowPickupRequest }) {
-  const label = prOutcomeLabel(pr)
-  const partial = label === PARTIALLY_PICKED
+  const label = pr.status   // the state, never the outcome reading (owner, 2026-10-23)
   const n = pr.overages.length
   return (
     <span className="inline-flex items-center gap-1" title={prOutcomeWords(pr) || pr.status}>
-      <StatusPill label={label} tone={partial ? 'warning' : pillTone(PR_STATUS_TONE[pr.status])} />
+      <StatusPill label={label} tone={pillTone(PR_STATUS_TONE[pr.status])} />
       {n > 0 && <StatusPill label={`+${n}`} tone="danger" />}
     </span>
   )
@@ -144,8 +143,9 @@ function Timeline({ pr }: { pr: GrowPickupRequest }) {
   const isExit = (s: PickupRequestStatus) => s === 'Pickup Failed' || s === 'Cancelled'
   /* the merchant's milestones — routing, dispatch and driver assignment (and their notes,
      which name the driver and the trip) are the carrier's planning steps */
-  const internal = (s: PickupRequestStatus) => s === 'Planned' || s === 'Ready For Last Mile Dispatch' || s === 'Assigned'
-  const steps = PR_STATUSES.filter((s) => !internal(s) && (!isExit(s) || seen.has(s)))
+  const internal = (s: PickupRequestStatus) => s === 'Driver Assigned For Pickup'
+  /* a draft step only on a request that was one */
+  const steps = PR_STATUSES.filter((s) => !internal(s) && ((!isExit(s) && s !== 'Created') || seen.has(s)))
   const reached = steps.reduce((n, s, i) => (seen.has(s) ? i : n), -1)
   return (
     <ol className="flex flex-col px-5 pb-5 pt-1">
@@ -211,7 +211,7 @@ export default function PickupRequestPage({ id: idProp, onClose }: { id?: string
   /* a driver who arrives to an empty dock has a FAILED pickup — the store refuses
      the Completed transition, so the action says so before it is pressed */
   const nothingToCollect = prHasNothingToCollect(pr)
-  const blockedComplete = next === 'Completed' && nothingToCollect
+  const blockedComplete = next === 'Pickedup' && nothingToCollect
   const windowStarted = prWindowStarted(pr)
   const backTo = `/grow/orders/pickups?tab=${LOCAL_PR_TAB_SLUG[localPrTabOf(pr, new Date(), pickupRequestById)]}`
   const close = onClose ?? (() => nav(backTo))
@@ -224,7 +224,7 @@ export default function PickupRequestPage({ id: idProp, onClose }: { id?: string
 
   const advance = () => {
     const s = growOrderActions.advancePickupRequest(pr.id)
-    if (s === 'Pickup Failed' && next === 'Completed') toast.error(`${pr.number} marked Pickup Failed — no orders to collect`)
+    if (s === 'Pickup Failed' && next === 'Pickedup') toast.error(`${pr.number} marked Pickup Failed — no orders to collect`)
     else if (s) toast.success(`Moved to ${s}`)
     else toast.info('This request is already at the end of the flow.')
   }

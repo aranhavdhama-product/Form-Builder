@@ -313,7 +313,7 @@ export const FIELDS: FieldDef[] = [
   f({ key: 'schedulingConfirmationRequired', label: 'Scheduling Confirmation Required', group: 'Service', capability: 'consignment', pickupDefault: 'No' }),
   f({
     key: 'schedulingConfirmed', label: 'Scheduling Confirmed', group: 'Service', capability: 'both', pickupDefault: 'No',
-    note: "A 'Requested' booking is exactly an unconfirmed schedule.",
+    note: "A 'Pickup Requested' booking is exactly an unconfirmed schedule.",
   }),
   f({ key: 'trackingNumber', label: 'Tracking Number', group: 'Identifiers', capability: 'consignment', pickupDefault: '—' }),
   f({ key: 'clearanceDone', label: 'Clearance Done', group: 'Service', capability: 'consignment', pickupDefault: '—' }),
@@ -415,7 +415,7 @@ export interface FilterDef {
 export const FILTERS: FilterDef[] = [
   { key: 'dateRange', label: 'Date range', consignment: 'yes', pickup: 'yes', placement: 'visible', defaultVisible: true, note: "Filters the row's primary date — the window on a pickup, created/ship-by on a consignment." },
   { key: 'pickupAddress', label: 'Pickup Address / Origin', consignment: 'yes', pickup: 'yes', placement: 'visible', defaultVisible: true, note: 'The dimension both existing lists already lead with.' },
-  { key: 'state', label: 'State / Secondary State', consignment: 'yes', pickup: 'yes', placement: 'visible', defaultVisible: true, note: "Set difference, not two lists bolted together: only 'Requested' and 'Cancelled' are new values." },
+  { key: 'state', label: 'State / Secondary State', consignment: 'yes', pickup: 'yes', placement: 'visible', defaultVisible: true, note: "Set difference, not two lists bolted together: only 'Pickup Requested' and 'Cancelled' are new values." },
   { key: 'rowType', label: 'Row Type', consignment: 'yes', pickup: 'yes', placement: 'advanced', defaultVisible: true, isNew: true, note: 'The most-used control on a mixed list, and the escape hatch back to a consignments-only view.' },
   { key: 'destination', label: 'Destination', consignment: 'yes', pickup: 'yes', placement: 'advanced', defaultVisible: true },
   { key: 'orderType', label: 'Order Type', consignment: 'yes', pickup: 'partial', placement: 'advanced', defaultVisible: true },

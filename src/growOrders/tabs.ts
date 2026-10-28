@@ -6,7 +6,7 @@
  * page whose tabs are derived from the order itself, so nothing can fall
  * between the two surfaces.
  */
-import type { GrowOrder, GrowPickupRequest, PickupRequestStatus } from './types'
+import type { GrowOrder, GrowPickupRequest, PickupRequestStatus, PrCutoff } from './types'
 import { NO_ORDERS_REASON } from './pickupReasons'
 import { pickupOutcomeFor } from './reasonPolicy'
 
@@ -164,22 +164,23 @@ export const rangesOverlap = (aStart: string, aEnd: string, bStart: string, bEnd
 
 /** Chip-strip order on the Pickup Requests page. */
 export const PR_STATUSES = [
-  'Requested', 'Planned', 'Ready For Last Mile Dispatch',
-  'Assigned', 'Out For Pickup', 'Completed', 'Pickup Failed', 'Cancelled',
+  'Created', 'Pickup Requested', 'Driver Assigned For Pickup', 'Out For Pickup', 'Pickedup', 'Pickup Failed', 'Cancelled',
 ] as const
 
-/** The state every booking is born in — see the note on `PickupRequestStatus`. */
-export const PR_ENTRY_STATUS: PickupRequestStatus = 'Requested'
-/** The states a request can still be SPLIT from — before the driver is on the way (owner, 2026-09-25). */
-export const SPLITTABLE_PR_STATUSES: PickupRequestStatus[] = ['Requested', 'Planned', 'Ready For Last Mile Dispatch', 'Assigned']
+/** The state every RAISED booking is born in (automatic, scheduled, "Create pickup request") — see `PickupRequestStatus`. */
+export const PR_ENTRY_STATUS: PickupRequestStatus = 'Pickup Requested'
+/** A draft: saved, not raised (owner, 2026-10-22). "Raise pickup request" moves it to `PR_ENTRY_STATUS`. */
+export const PR_DRAFT_STATUS: PickupRequestStatus = 'Created'
+export const isDraftPr = (s: PickupRequestStatus): boolean => s === PR_DRAFT_STATUS
+/** The states a request can still be SPLIT (or merged) from — until a driver is assigned (owner, 2026-10-22). */
+export const SPLITTABLE_PR_STATUSES: PickupRequestStatus[] = ['Pickup Requested']
 /** May `p` be split? Still editable and holding at least two consignments (one must stay). */
 export const canSplitPr = (p: Pick<GrowPickupRequest, 'status' | 'orderIds'>): boolean =>
   SPLITTABLE_PR_STATUSES.includes(p.status) && p.orderIds.length >= 2
 
 /** The happy path a request walks; `Pickup Failed` / `Cancelled` are side exits. */
 export const PR_FLOW: PickupRequestStatus[] = [
-  'Requested', 'Planned', 'Ready For Last Mile Dispatch',
-  'Assigned', 'Out For Pickup', 'Completed',
+  'Created', 'Pickup Requested', 'Driver Assigned For Pickup', 'Out For Pickup', 'Pickedup',
 ]
 
 /** The next state "Simulate next step" moves to, or null at the end of the flow. */
@@ -197,15 +198,17 @@ export const prHasNothingToCollect = (
   p: Pick<GrowPickupRequest, 'orderIds' | 'pickedOrderIds' | 'overages'>,
 ): boolean => p.orderIds.length === 0 && p.pickedOrderIds.length === 0 && p.overages.length === 0
 
-/** Open = still expected to happen; drives the Overdue badge and duplicate detection. */
+/** Open = still expected to happen (a draft included — it sits on the Active tab). */
 export const isOpenPr = (s: PickupRequestStatus): boolean =>
-  s !== 'Completed' && s !== 'Pickup Failed' && s !== 'Cancelled'
+  s !== 'Pickedup' && s !== 'Pickup Failed' && s !== 'Cancelled'
+/** Open AND raised — what Overdue, the at-risk readings and Duplicate look at: a draft is nobody's job yet. */
+export const isRaisedOpenPr = (s: PickupRequestStatus): boolean => isOpenPr(s) && !isDraftPr(s)
 
 /* ------------------------------------------ console (LOCAL) pickup flags ---- */
 
 /**
  * DERIVED pickup flags for the console's Pickup Requests page. None of these is
- * stored — `PickupRequestStatus` stays the eight platform states, and each flag
+ * stored — `PickupRequestStatus` stays the nine platform states, and each flag
  * is a reading of the record, so it can never drift from the facts behind it.
  */
 type PrFacts = Pick<GrowPickupRequest,
@@ -222,14 +225,14 @@ export const isHeldForReview = (p: Pick<GrowPickupRequest, 'status' | 'attempt' 
  *  as Grow's `prOutcomeLabel` (GrowOrders/utils.ts), restated because this
  *  module cannot import a page. */
 export const isPartiallyPicked = (p: Pick<GrowPickupRequest, 'status' | 'orderIds' | 'pickedOrderIds'>): boolean => {
-  if (p.status !== 'Completed') return false
+  if (p.status !== 'Pickedup') return false
   const picked = new Set(p.pickedOrderIds)
   return p.orderIds.some((id) => !picked.has(id))
 }
 
 /** Still expected to happen, but the window has already closed. */
 export const isOverduePr = (p: Pick<GrowPickupRequest, 'status' | 'endAt'>, now = new Date()): boolean =>
-  isOpenPr(p.status) && !!p.endAt && atDate(p.endAt) < now
+  isRaisedOpenPr(p.status) && !!p.endAt && atDate(p.endAt) < now
 
 /* ------------------------------------------------------------- at risk ---- */
 
@@ -254,25 +257,25 @@ const clock = (at: string) => at.slice(11, 16)
 /** Collected a long time ago and still not received at the hub (no truck-arrival signal, no scan). */
 export function isStuckInTransit(p: PrFacts, now = new Date()): boolean {
   if (!isInTransitToHub(p)) return false
-  const done = [...(p.statusHistory ?? [])].reverse().find((e) => e.status === 'Completed')?.at
+  const done = [...(p.statusHistory ?? [])].reverse().find((e) => e.status === 'Pickedup')?.at
   return !!done && (now.getTime() - new Date(done).getTime()) / 3_600_000 >= STUCK_IN_TRANSIT_HOURS
 }
 
 export function riskReasons(p: PrFacts, now = new Date(), leadMins = AT_RISK_LEAD_MINS): PrRisk[] {
   const out: PrRisk[] = []
   if (isStuckInTransit(p, now)) {
-    const done = [...(p.statusHistory ?? [])].reverse().find((e) => e.status === 'Completed')?.at ?? ''
+    const done = [...(p.statusHistory ?? [])].reverse().find((e) => e.status === 'Pickedup')?.at ?? ''
     const hours = Math.floor((now.getTime() - new Date(done).getTime()) / 3_600_000)
     out.push({ code: 'stuck', label: `Not received at the hub — ${hours} h`, tone: 'danger' })
   }
-  if (!isOpenPr(p.status) || !p.startAt) return out
+  if (!isRaisedOpenPr(p.status) || !p.startAt) return out
   const toStart = (atDate(p.startAt).getTime() - now.getTime()) / 60_000
   const carrier = p.carrierMode === 'CARRIER'
   if (p.status !== 'Out For Pickup' && toStart <= -LATE_GRACE_MINS && !isOverduePr(p, now)) {
     out.push({ code: 'late', label: `Late — window opened ${clock(p.startAt)}`, tone: 'danger' })
   } else if (toStart > -LATE_GRACE_MINS && toStart <= leadMins && p.status !== 'Out For Pickup') {
-    if (!carrier && p.status === 'Requested' && !p.tripId) out.push({ code: 'unplanned', label: `Not planned — starts in ${inWords(toStart)}`, tone: 'warning' })
-    else if (!carrier && p.status === 'Planned') out.push({ code: 'no-driver', label: `No driver yet — starts in ${inWords(toStart)}`, tone: 'warning' })
+    if (!carrier && p.status === 'Pickup Requested' && !p.tripId) out.push({ code: 'unplanned', label: `Not planned — starts in ${inWords(toStart)}`, tone: 'warning' })
+    else if (!carrier && p.status === 'Pickup Requested' && p.tripId) out.push({ code: 'no-driver', label: `No driver yet — starts in ${inWords(toStart)}`, tone: 'warning' })
     if (p.slotConfirmed === false) out.push({ code: 'unconfirmed', label: 'Slot unconfirmed', tone: 'warning' })
   }
   return out
@@ -305,19 +308,19 @@ export const handoverReconciled = (p: Pick<GrowPickupRequest, 'orderIds' | 'pick
 
 /** `Handed Over` — collected and the handover closed (reconciled or force-closed). */
 export const isHandedOver = (p: Pick<GrowPickupRequest, 'status' | 'handover'>): boolean =>
-  p.status === 'Completed' && p.handover.closedAt != null
+  p.status === 'Pickedup' && p.handover.closedAt != null
 
 /** `Discrepancy` — the truck is at the hub and the driver's and hub's scans
  *  disagree, either way round. Never before arrival: en route, the hub simply
  *  has not seen the parcels yet (that is `isInTransitToHub`). */
 export const hasDiscrepancy = (p: Pick<GrowPickupRequest, 'status' | 'handover'>): boolean =>
-  p.status === 'Completed' && p.handover.mode !== 'hub' && p.handover.closedAt == null
+  p.status === 'Pickedup' && p.handover.mode !== 'hub' && p.handover.closedAt == null
   && p.handover.arrivedAtHubAt != null
   && !sameSet(p.handover.driverScanned, p.handover.hubScanned)
 
 /** `In transit to hub` — collected, a handover still to happen, truck not yet at the hub. */
 export const isInTransitToHub = (p: Pick<GrowPickupRequest, 'status' | 'orderIds' | 'pickedOrderIds' | 'handover'>): boolean =>
-  p.status === 'Completed' && p.handover.closedAt == null && p.handover.arrivedAtHubAt == null
+  p.status === 'Pickedup' && p.handover.closedAt == null && p.handover.arrivedAtHubAt == null
   && handoverExpected(p).length > 0
 
 /** Looks a request up by id — passed IN, because this module must not import the store. */
@@ -338,18 +341,29 @@ export const reattemptPending = (p: Pick<GrowPickupRequest, 'status' | 'reattemp
 export const canReattempt = (p: Pick<GrowPickupRequest, 'status' | 'attempt' | 'maxAttempts' | 'reattemptPrId'>): boolean =>
   p.status === 'Pickup Failed' && p.attempt < p.maxAttempts && !p.reattemptPrId
 
+/** Where a request stands against a cut-off: draft 0 · raised 1 · on a route 2 · driver assigned 3 · out 4 · picked 5. */
+export const prStage = (p: Pick<GrowPickupRequest, 'status'> & Partial<Pick<GrowPickupRequest, 'tripId'>>): number => {
+  switch (p.status) {
+    case 'Created': return 0
+    case 'Pickup Requested': return p.tripId ? 2 : 1
+    case 'Driver Assigned For Pickup': return 3
+    case 'Out For Pickup': return 4
+    default: return 5
+  }
+}
+const CUTOFF_STAGE: Record<PrCutoff, number> = { 'Pickup Requested': 1, 'On a route': 2, 'Driver Assigned For Pickup': 3 }
+/** the cut-off in words — "until it is on a route" */
+export const CUTOFF_WORDS: Record<PrCutoff, string> = {
+  'Pickup Requested': 'it is requested', 'On a route': 'it is on a route', 'Driver Assigned For Pickup': 'a driver is assigned',
+}
+
 /**
  * May more orders still join this request? Open, and not past the config's
- * `allowAddToExistingUntil` state on the happy path (Ready For Last Mile
- * Dispatch sits between Planned and Assigned, so it is allowed only when the
- * limit is Assigned).
+ * `allowAddToExistingUntil` cut-off (a draft always may).
  */
 export const canAddOrdersTo = (
-  p: Pick<GrowPickupRequest, 'status'>, until: 'Requested' | 'Planned' | 'Assigned',
-): boolean => {
-  const i = PR_FLOW.indexOf(p.status)
-  return i !== -1 && i <= PR_FLOW.indexOf(until)
-}
+  p: Pick<GrowPickupRequest, 'status'> & Partial<Pick<GrowPickupRequest, 'tripId'>>, until: PrCutoff,
+): boolean => isOpenPr(p.status) && prStage(p) <= CUTOFF_STAGE[until]
 
 /**
  * The console's Pickup Requests tabs. `Eligible consignments` (owner, 2026-09-25;
@@ -394,7 +408,7 @@ export function localPrTabOf(p: PrFacts, now = new Date(), byId?: PrLookup): Loc
   if (isInTransitToHub(p)) return isStuckInTransit(p, now) ? ATTENTION_REQUIRED : 'Active'
   /* owner, 2026-09-25: a COMPLETED request does not sit under Attention Required for a partial pick (its flag stays on the row and
      the detail page, under Closed). 2026-10-07: EXCEPT a scan discrepancy at the hub — its handover is still open, so it is not Closed */
-  if (p.status === 'Completed') return hasDiscrepancy(p) ? ATTENTION_REQUIRED : 'Closed'
+  if (p.status === 'Pickedup') return hasDiscrepancy(p) ? ATTENTION_REQUIRED : 'Closed'
   if (canReattempt(p) || (byId && reattemptPending(p, byId)) || isPartiallyPicked(p) || hasDiscrepancy(p)
     || isHeldForReview(p) || isOverduePr(p, now) || riskReasons(p, now).length > 0) return ATTENTION_REQUIRED
   if (isOpenPr(p.status)) return 'Active'

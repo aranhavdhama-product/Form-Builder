@@ -107,7 +107,7 @@ export function AddToRouteDialog({ prIds, initialWay, manualOnly, onClose, onDon
       </Button></>}>
       <p className="pb-3 text-[13px] text-ink-2">
         {open.length === 0
-          ? 'None of the selected requests is open — only a Requested / Planned / Assigned / Out For Pickup request can be routed.'
+          ? 'None of the selected requests is open — only a Pickup Requested / Driver Assigned For Pickup / Out For Pickup request can be routed.'
           : <>Routing <b>{open.map((p) => p.number).join(', ')}</b>{first && <> · window {fmtDay(first.date)} {first.slot}</>}.</>}
         {skipped > 0 && open.length > 0 && <span className="text-ink-3"> {skipped} closed request{skipped === 1 ? '' : 's'} skipped.</span>}
       </p>
@@ -192,7 +192,7 @@ export function AddToRouteDialog({ prIds, initialWay, manualOnly, onClose, onDon
           </Field>
           <Field label="Vehicle"><Input value={vehicle} onChange={setVehicle} placeholder="Optional" /></Field>
           <p className="self-end pb-1 text-[12px] text-ink-3">
-            {driver ? 'With a driver the trip is Yet to start and the requests become Assigned.' : 'Without a driver the trip is Un-assigned and the requests are Planned.'}
+            {driver ? 'With a driver the trip is Yet to start and the requests become Driver Assigned For Pickup.' : 'Without a driver the trip is Un-assigned and the requests stay Pickup Requested, tagged with the trip.'}
           </p>
         </div>
       )}

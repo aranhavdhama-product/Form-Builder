@@ -237,7 +237,7 @@ export const refOf = (s: PickupSchedule, r: ScheduleRun, date: string): PickupSc
 /* ------------------------------------------------- which run a waybill joins ---- */
 
 /** the states a roster request can still take a waybill in — before the driver is at the pickup (FR-05.3) */
-const JOINABLE = new Set(['Requested', 'Planned', 'Ready For Last Mile Dispatch', 'Assigned'])
+const JOINABLE = new Set(['Pickup Requested', 'Driver Assigned For Pickup'])
 
 /**
  * The run a waybill / consignment ready at `readyAt` joins at its location (FR-05.2, FR-05.3):
@@ -255,6 +255,6 @@ export function pickRunPr(prs: GrowPickupRequest[], storeCode: string, readyAt: 
 
 /** Roster requests of an EARLIER day that nobody assigned by its end — closed at 23:59 (FR-08.4). */
 export const staleScheduleRequests = (prs: GrowPickupRequest[], today: string): GrowPickupRequest[] =>
-  prs.filter((p) => p.schedule && p.date < today && p.status === 'Requested' && !p.tripId)
+  prs.filter((p) => p.schedule && p.date < today && p.status === 'Pickup Requested' && !p.tripId)
 
 export { dayOf }

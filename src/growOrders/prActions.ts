@@ -12,13 +12,14 @@
  * set rules (one hub to route, one pickup point to merge, single-row actions).
  */
 import type { PickupModuleConfig } from '../config/pickupModule'
-import type { GrowPickupRequest, PickupRequestStatus } from './types'
+import { PR_CUTOFFS, type GrowPickupRequest, type PickupRequestStatus, type PrCutoff } from './types'
 import { NO_ORDERS_REASON } from './pickupReasons'
 import {
-  canAddOrdersTo, canReattempt, canSplitPr, isOpenPr, isPartiallyPicked, SPLITTABLE_PR_STATUSES, type PrLookup,
+  canAddOrdersTo, canReattempt, canSplitPr, CUTOFF_WORDS, isDraftPr, isOpenPr, isPartiallyPicked, SPLITTABLE_PR_STATUSES, type PrLookup,
 } from './tabs'
 
 export type PrAction =
+  | 'raise'
   | 'reschedule' | 'cancel'
   | 'assignCarrier' | 'switchToFleet'
   | 'addToRoute' | 'planCollection' | 'planRoute' | 'loadPlanning' | 'moveRoute' | 'removeFromRoute' | 'changeAssignee'
@@ -46,10 +47,10 @@ export interface PrActionState { enabled: boolean; reason?: string }
 export type PrFacts = Pick<GrowPickupRequest,
   'id' | 'number' | 'status' | 'orderIds' | 'pickedOrderIds' | 'tripId' | 'carrierMode' | 'carrierName'
   | 'attempt' | 'maxAttempts' | 'reattemptPrId' | 'failureReason' | 'handover' | 'slotConfirmed'
-  | 'shipmentType' | 'storeCode' | 'shipFrom' | 'destinationCode'>
+  | 'shipmentType' | 'storeCode' | 'shipFrom' | 'destinationCode'> & Partial<Pick<GrowPickupRequest, 'blind'>>
 
 /** What a merchant may do from Grow at all; everything else is the carrier console's. */
-const MERCHANT_ACTIONS: PrAction[] = ['reschedule', 'cancel', 'addConsignments', 'removeConsignment', 'split', 'merge', 'printLabel', 'downloadCsv']
+const MERCHANT_ACTIONS: PrAction[] = ['raise', 'reschedule', 'cancel', 'addConsignments', 'removeConsignment', 'split', 'merge', 'printLabel', 'downloadCsv']
 
 /** Actions that open a one-request dialog — in a selection they need exactly one row. */
 export const SINGLE_ROW_ACTIONS: PrAction[] = ['addConsignments', 'removeConsignment', 'markPickedUp', 'closeHandover', 'moveRoute', 'reattemptRemainder']
@@ -75,6 +76,10 @@ export const pickupPointKey = (p: Pick<GrowPickupRequest, 'storeCode' | 'shipFro
 /** The hub a request is routed from — the key `AddToRouteDialog` routes with. */
 export const routingHubOf = (p: Pick<GrowPickupRequest, 'destinationCode' | 'storeCode'>) => p.destinationCode ?? p.storeCode
 
+/** A draft (`Created`, owner 2026-10-22) is only edited, raised or dropped — nothing runs on it until it is raised. */
+const DRAFT_ACTIONS: PrAction[] = ['raise', 'reschedule', 'cancel', 'addConsignments', 'removeConsignment', 'downloadCsv']
+export const DRAFT_REASON = 'Created (draft) — raise the pickup request first'
+
 const ok: PrActionState = { enabled: true }
 const no = (reason: string): PrActionState => ({ enabled: false, reason })
 const OUT = 'Already out for pickup'
@@ -82,7 +87,7 @@ const OUT = 'Already out for pickup'
 /** "Cancelled requests cannot be rescheduled" — the closed-state wording. */
 function closedReason(s: PickupRequestStatus, verb: string): string {
   if (s === 'Cancelled') return `Cancelled requests cannot be ${verb}`
-  if (s === 'Completed') return `Completed requests cannot be ${verb}`
+  if (s === 'Pickedup') return `Picked-up requests cannot be ${verb}`
   return `Failed requests cannot be ${verb}`
 }
 
@@ -95,33 +100,38 @@ function beforeDispatch(p: PrFacts, verb: string, outReason = OUT): PrActionStat
 
 /** The merchant's cut-off (`merchantCancelUntil`, spec M1/M2). */
 function merchantGate(p: PrFacts, until: PickupModuleConfig['merchantCancelUntil'], verb: string): PrActionState | null {
-  return canAddOrdersTo(p, until) ? null : no(`You can ${verb} until ${until} — contact support`)
+  return canAddOrdersTo(p, until) ? null : no(`You can ${verb} until ${CUTOFF_WORDS[until]} — contact support`)
 }
 
-const STAGE_ORDER = ['Requested', 'Planned', 'Assigned'] as const
-const earlier = (a: (typeof STAGE_ORDER)[number], b: (typeof STAGE_ORDER)[number]) =>
-  (STAGE_ORDER.indexOf(a) <= STAGE_ORDER.indexOf(b) ? a : b)
+const earlier = (a: PrCutoff, b: PrCutoff) => (PR_CUTOFFS.indexOf(a) <= PR_CUTOFFS.indexOf(b) ? a : b)
 
 export function prActionState(action: PrAction, p: PrFacts, ctx: PrActionCtx): PrActionState {
   const role = ctx.role ?? 'ops'
   if (role === 'merchant' && !MERCHANT_ACTIONS.includes(action)) return no('Done by the carrier console')
   const merchant = role === 'merchant'
   const blocked = (...gs: (PrActionState | null)[]) => gs.find((g) => g) ?? null
+  if (isDraftPr(p.status) && !DRAFT_ACTIONS.includes(action)) return no(DRAFT_REASON)
 
   switch (action) {
     case 'downloadCsv': return ok
+
+    case 'raise':
+      if (!isDraftPr(p.status)) return no(isOpenPr(p.status) ? 'Already raised' : closedReason(p.status, 'raised'))
+      return p.orderIds.length || p.blind ? ok : no('Add consignments first')
 
     case 'reschedule':
       return blocked(beforeDispatch(p, 'rescheduled'), merchant ? merchantGate(p, ctx.cfg.merchantCancelUntil, 'reschedule') : null) ?? ok
 
     case 'cancel':
-      return blocked(beforeDispatch(p, 'cancelled', merchant ? OUT : `${OUT} — mark it failed instead`),
-        merchant ? merchantGate(p, ctx.cfg.merchantCancelUntil, 'cancel') : null) ?? ok
+      /* owner, 2026-10-22: ops cancel a request in ANY non-terminal state (Out For Pickup too — it leaves its trip);
+         a merchant still cancels only within its own cut-off */
+      if (!merchant) return isOpenPr(p.status) ? ok : no(closedReason(p.status, 'cancelled'))
+      return blocked(beforeDispatch(p, 'cancelled'), merchantGate(p, ctx.cfg.merchantCancelUntil, 'cancel')) ?? ok
 
     case 'addConsignments': {
       const until = merchant ? earlier(ctx.cfg.allowAddToExistingUntil, ctx.cfg.merchantCancelUntil) : ctx.cfg.allowAddToExistingUntil
       return blocked(beforeDispatch(p, 'added to', `${OUT} — extra parcels become overages`))
-        ?? (canAddOrdersTo(p, until) ? ok : no(`Consignments can be added until ${until}`))
+        ?? (canAddOrdersTo(p, until) ? ok : no(`Consignments can be added until ${CUTOFF_WORDS[until]}`))
     }
 
     case 'removeConsignment':
@@ -133,7 +143,7 @@ export function prActionState(action: PrAction, p: PrFacts, ctx: PrActionCtx): P
       if (p.shipmentType === 'FTL') return no('Full-vehicle bookings are never split')
       const g = blocked(beforeDispatch(p, 'split'), merchant ? merchantGate(p, ctx.cfg.merchantCancelUntil, 'split') : null)
       if (g) return g
-      if (!SPLITTABLE_PR_STATUSES.includes(p.status)) return no(`${p.status} requests cannot be split`)
+      if (!SPLITTABLE_PR_STATUSES.includes(p.status)) return no(`${p.status} — split only until a driver is assigned`)
       return canSplitPr(p) ? ok : no(p.orderIds.length ? 'Only one consignment — nothing to split' : 'No consignments yet — nothing to split')
     }
 
@@ -141,11 +151,11 @@ export function prActionState(action: PrAction, p: PrFacts, ctx: PrActionCtx): P
       const g = beforeDispatch(p, 'assigned')
       if (g) return g
       if (p.tripId) return no(`On trip ${p.tripId} — remove it from the route first`)
-      if (p.carrierMode === 'CARRIER' && p.status === 'Assigned') return no(`Already with ${p.carrierName ?? 'a carrier'} — switch to fleet first`)
+      if (p.carrierMode === 'CARRIER' && p.status === 'Driver Assigned For Pickup') return no(`Already with ${p.carrierName ?? 'a carrier'} — switch to fleet first`)
       /* handing it to a carrier plans it, like routing — not before the shipper confirms the slot */
       if (p.slotConfirmed === false) return no('Awaiting slot confirmation from the shipper')
-      if (p.status === 'Requested' || p.status === 'Planned' || p.status === 'Ready For Last Mile Dispatch') return ok
-      return no(`${p.status} — assign a carrier while Requested`)
+      if (p.status === 'Pickup Requested') return ok
+      return no(`${p.status} — assign a carrier while Pickup Requested`)
     }
 
     case 'switchToFleet':
@@ -157,7 +167,7 @@ export function prActionState(action: PrAction, p: PrFacts, ctx: PrActionCtx): P
       if (g) return g
       if (p.carrierMode === 'CARRIER') return no('Assigned to a carrier')
       if (p.tripId) return no(`Already on a trip (${p.tripId})`)
-      if (p.status !== 'Requested' && p.status !== 'Planned') return no(`${p.status} — only Requested or Planned requests can be routed`)
+      if (p.status !== 'Pickup Requested') return no(`${p.status} — only Pickup Requested requests can be routed`)
       if (p.slotConfirmed === false) return no('Awaiting slot confirmation from the shipper')
       return ok
     }
@@ -184,13 +194,13 @@ export function prActionState(action: PrAction, p: PrFacts, ctx: PrActionCtx): P
     case 'markPickedUp': case 'markFailed': {
       const verb = action === 'markPickedUp' ? 'marked picked up' : 'marked failed'
       if (!isOpenPr(p.status)) return no(closedReason(p.status, verb))
-      if (p.status !== 'Assigned' && p.status !== 'Out For Pickup') return no('Not dispatched yet — reschedule or cancel instead')
+      if (p.status !== 'Driver Assigned For Pickup' && p.status !== 'Out For Pickup') return no('Not dispatched yet — reschedule or cancel instead')
       if (action === 'markPickedUp' && p.orderIds.length === 0) return no('No consignments to mark picked up')
       return ok
     }
 
     case 'closeHandover':
-      if (p.status !== 'Completed') return no('Only a completed pickup has a handover to close')
+      if (p.status !== 'Pickedup') return no('Only a completed pickup has a handover to close')
       return p.handover.closedAt ? no('Handover already closed') : ok
 
     case 'printLabel':
@@ -204,8 +214,8 @@ export function prActionState(action: PrAction, p: PrFacts, ctx: PrActionCtx): P
       if (p.carrierMode !== 'CARRIER') return no('Only a 3PL pickup is accepted by a carrier')
       if (p.handover.closedAt) return no('Handover already closed')
       /* accepting IS the handover — an empty (blind) request would only fail as "No orders to collect" */
-      if (p.status !== 'Completed' && !p.orderIds.length) return no('Nothing booked on it yet — add consignments first')
-      return p.status === 'Assigned' || p.status === 'Out For Pickup' || p.status === 'Completed'
+      if (p.status !== 'Pickedup' && !p.orderIds.length) return no('Nothing booked on it yet — add consignments first')
+      return p.status === 'Driver Assigned For Pickup' || p.status === 'Out For Pickup' || p.status === 'Pickedup'
         ? ok : no(`${p.status} — the carrier accepts once assigned`)
 
     case 'confirmSlot':
@@ -215,7 +225,7 @@ export function prActionState(action: PrAction, p: PrFacts, ctx: PrActionCtx): P
 
     case 'merge':
       if (p.shipmentType === 'FTL') return no('Full-vehicle bookings are never merged')
-      if (p.status !== 'Requested' && p.status !== 'Planned') return no(`${p.status} — only Requested or Planned requests can merge`)
+      if (p.status !== 'Pickup Requested') return no(`${p.status} — merge only until a driver is assigned`)
       /* owner, 2026-09-25: the merchant merges too, until its own cut-off */
       return (merchant ? merchantGate(p, ctx.cfg.merchantCancelUntil, 'merge') : null) ?? ok
   }

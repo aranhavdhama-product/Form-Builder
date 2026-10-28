@@ -78,12 +78,13 @@
 }
 
 /* The ONE field-header style across the demo (owner, 2026-10-05: "Lato 500 · 14px / 20px · rgb(76, 87, 97) —
-   more readable"): every label above an input uses it. ink-2 IS rgb(76, 87, 97). */
+   more readable"; 2026-10-28: "form field header font weight 700, keep everything else the same"): every label above an
+   input uses it. ink-2 IS rgb(76, 87, 97). */
 @utility field-label {
   font-family: var(--font-lato);
   font-size: 14px;
   line-height: 20px;
-  font-weight: 500;
+  font-weight: 700;
   color: var(--color-ink-2);
   letter-spacing: normal;
   text-transform: none;
@@ -196,4 +197,28 @@ body {
 .time-field {
   font-family: inherit;
   font-variant-numeric: tabular-nums;
+}
+
+/* The consignment form's field grids run at TWICE the columns (owner, 2026-10-28: Width S = half a field, M = the normal
+   field, L = two fields, Full = the row) — every grid item takes two by default. In the components layer and behind
+   :where(), so a field's own span class (utilities) always wins. Below the breakpoint the grid is one column. */
+@layer components {
+  @media (min-width: 40rem) { :where(.fgrid) > * { grid-column: span 2 / span 2; } }
+  @container (min-width: 380px) { :where(.fgrid-cq) > * { grid-column: span 2 / span 2; } }
+}
+
+/* The required mark (owner, 2026-10-28: "the * for a required field should be more prominent"): the danger red, heavier and a
+   touch larger than the label, set slightly apart — every required field label on the consignment forms uses it. */
+@utility req-star {
+  color: var(--color-danger-fg);
+  font-weight: 900;
+  font-size: 16px;
+  line-height: 1;
+  margin-left: 3px;
+  vertical-align: -1px;
+}
+
+/* The package row's finer grid (owner, 2026-10-28: "S too small, M too large"): 3 units a field — S = 2, M = 3, L = 6. */
+@layer components {
+  @container (min-width: 380px) { :where(.fgrid3-cq) > * { grid-column: span 3 / span 3; } }
 }

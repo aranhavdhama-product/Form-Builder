@@ -75,7 +75,7 @@ export function stopOutcome(x: PlannedStop, planning: PlanningDb): StopOutcome {
     return x.status === 'Arrived' ? 'Arrived' : 'Pending'
   }
   const pr = pickupRequestById(x.prId)
-  if (pr?.status === 'Completed') return pr.orderIds.some((i) => !pr.pickedOrderIds.includes(i)) ? 'Partially picked' : 'Picked'
+  if (pr?.status === 'Pickedup') return pr.orderIds.some((i) => !pr.pickedOrderIds.includes(i)) ? 'Partially picked' : 'Picked'
   if (pr?.status === 'Pickup Failed' || pr?.status === 'Cancelled' || x.status === 'Failed') return 'Pickup failed'
   return x.status === 'Arrived' ? 'Arrived' : 'Pending'
 }
@@ -199,7 +199,7 @@ export function completePickup(tripId: string, prId: string, work: PickupWork, p
   }
   const notPickedReasons = Object.fromEntries(Object.entries(work.notPicked).filter(([id]) => !scanned.includes(id)))
   planningActions.completePickupStop(tripId, prId, scanned, { notPickedReasons, pod, overages })
-  if (pickupRequestById(prId)?.status !== 'Completed') return
+  if (pickupRequestById(prId)?.status !== 'Pickedup') return
   const store = storeOf(pr)
   kept.filter((v) => v.action === 'create').forEach((v) => {
     const o: GrowOrder = {

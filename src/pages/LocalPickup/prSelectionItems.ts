@@ -1,6 +1,6 @@
 /**
  * The ONE selection menu for pickup-request rows (owner, 2026-09-25): the
- * `/local/pickup` grid and Pending for Planning offer the SAME 16 items, each
+ * `/local/pickup` grid and Pending for Planning offer the SAME 17 items, each
  * gated by the one matrix (`growOrders/prActions.prBulkState`) — enabled only
  * when allowed for EVERY selected request, else disabled with the reason.
  *
@@ -51,7 +51,7 @@ function routingItems(sel: GrowPickupRequest[], ctx: Parameters<typeof prBulkSta
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
 
 /**
- * The 16 items, in the Pickup page's order. `openDialog` receives what to open;
+ * The 17 items, in the Pickup page's order. `openDialog` receives what to open;
  * `clear` empties the page's selection once an item has run.
  */
 export function prSelectionItems(sel: GrowPickupRequest[], { cfg, db, openDialog, clear }: {
@@ -73,6 +73,9 @@ export function prSelectionItems(sel: GrowPickupRequest[], { cfg, db, openDialog
     clear()
   }
   return [
+    /* a draft (Created) is raised first (owner, 2026-10-22) — every other item names that as its reason */
+    item('raise', 'Raise pickup request', each((p) => growOrderActions.raisePickupRequest(p.id),
+      (n) => `${plural(n, 'pickup request')} raised.`)),
     /* the routing entries (owner, 2026-10-09): Add To Best Route (no popup) · Manual */
     ...routingItems(sel, ctx, openDialog, clear),
     item('assignCarrier', 'Assign carrier', open('carrier')),

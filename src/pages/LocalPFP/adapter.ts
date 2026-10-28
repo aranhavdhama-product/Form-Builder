@@ -16,11 +16,11 @@
 import type { ConsignmentOrderRow, ConsignmentState, TimeWindow } from '../../data/mockData'
 import { officialState } from '../../growOrders/fareyeStates'
 import type { GrowOrder, GrowOrdersDb, GrowPickupRequest, StoreLocation } from '../../growOrders/types'
-import { displayStatus, isOpenPr, type DisplayStatus } from '../../growOrders/tabs'
+import { displayStatus, isRaisedOpenPr, type DisplayStatus } from '../../growOrders/tabs'
 import { hubName, inboundHubFor } from '../../growOrders/hubs'
 import { can } from '../LocalPickup/prModel'
 import {
-  PARTIALLY_PICKED, pickupPointAddress, pickupPointName, pickupSummary, prDisplayQty,
+  pickupPointAddress, pickupPointName, pickupSummary, prDisplayQty,
   prDisplayWeight, prOutcomeLabel, prOverdue, prReconciled, prSpan, prWindow,
 } from '../GrowOrders/utils'
 
@@ -39,7 +39,7 @@ const HEAVY_KG = 25
 /** Declared value above which the parcel is handled as Fragile / high-value. */
 const FRAGILE_VALUE = 5000
 
-function flagsOf(o: GrowOrder): CategoryFlag[] {
+export function flagsOf(o: GrowOrder): CategoryFlag[] {
   /* the console's Add form records Order Category explicitly (owner, 2026-09-24);
      a merchant order has no such record and keeps the derived flags */
   const explicit = o.consignment?.category
@@ -75,6 +75,10 @@ const volumeCm3 = (o: GrowOrder): number =>
 export const volumeMm3 = (o: GrowOrder): number => Math.round(volumeCm3(o) * 1000)
 
 /** A standard pallet footprint holds ~1.2 m³; every consignment occupies ≥ 1. */
+/** One number per package: `<consignment>-P<n>` — what a package barcode reads (the Scan page resolves it back). */
+export const packageNumbersOf = (o: GrowOrder): string[] =>
+  Array.from({ length: Math.max(1, o.pkg.count) }, (_, i) => `${o.orderNumber}-P${i + 1}`)
+
 export const palletSpacesOf = (o: GrowOrder): number =>
   Math.max(1, Math.ceil(volumeCm3(o) / 1_000_000 / 1.2))
 
@@ -122,10 +126,11 @@ export function fareyeStatesOf(
   }
   /* still with the merchant: Ready for Pickup / Pickup Scheduled */
   const booked = prs.find((p) => p.id === o.pickupRequestId)
-  if (booked && isOpenPr(booked.status)) {
+  /* a DRAFT request (Created, owner 2026-10-22) is not raised: its consignments keep their own state below until it is */
+  if (booked && isRaisedOpenPr(booked.status)) {
     /* the OFFICIAL pairs (owner, 2026-10-08): PICKUP_REQUESTED has no secondary; a driver assigned for the pickup is CREATED +
        DRIVER_ASSIGNED_FOR_PICKUP; on the way is DRIVER_OUT + OUT_FOR_PICKUP. Planned is the request's own stage, not a state. */
-    if (booked.status === 'Assigned') return { state: 'Created', secondary: 'Driver Assigned For Pickup' }
+    if (booked.status === 'Driver Assigned For Pickup') return { state: 'Created', secondary: 'Driver Assigned For Pickup' }
     if (booked.status === 'Out For Pickup') return { state: 'Driver Out', secondary: 'Out For Pickup' }
     return { state: 'Pickup Requested', secondary: '' }
   }
@@ -437,11 +442,7 @@ export function toConsignmentRow(
     shipFromCode: o.storeCode,
     pickupWindow: pickup,
     deliveryWindow: delivery,
-    shipments: Array.from({ length: pieces }, (_, i) => ({
-      id: `${o.orderNumber}-P${i + 1}`,
-      trackingNumber: o.trackingNumber || `${o.orderNumber}-P${i + 1}`,
-      outcome: null,
-    })),
+    shipments: packageNumbersOf(o).map((n) => ({ id: n, trackingNumber: o.trackingNumber || n, outcome: null })),
     attachments: [],
     merchant: store?.party.businessName || o.sender.businessName || o.storeCode,
     orderTypeLabel: o.orderType === 'Reverse Order' ? 'Reverse' : 'Forward',
@@ -546,12 +547,10 @@ export const isPickupRow = (r: UnifiedRow): r is LocalPickupRow => r.rowType !==
  * Grow's pickup chip tones are the Grow palette ('error'); the nueva StatusPill
  * speaks 'danger'. One map, here, rather than a cast at every call site.
  */
-export function pickupStateTone(p: GrowPickupRequest): 'success' | 'info' | 'warning' | 'danger' | 'neutral' {
-  if (prOutcomeLabel(p) === PARTIALLY_PICKED) return 'warning'
-  if (p.status === 'Pickup Failed') return 'danger'
-  if (p.status === 'Cancelled') return 'neutral'
-  if (p.status === 'Completed') return 'success'
-  if (p.status === 'Requested') return 'neutral'
+export function pickupStateTone(p: GrowPickupRequest): 'success' | 'info' | 'danger' {
+  /* owner, 2026-10-22: blue by default, green once picked up, red failed / cancelled — nothing else */
+  if (p.status === 'Pickedup') return 'success'
+  if (p.status === 'Pickup Failed' || p.status === 'Cancelled') return 'danger'
   return 'info'
 }
 
@@ -595,9 +594,9 @@ export function toPickupRow(
     id: p.id,
     prId: p.id,
     reference: p.number,
-    state: outcome,
-    /* the raw status is worth showing only when the outcome renamed it */
-    secondaryState: outcome === p.status ? '' : p.status,
+    /* the STATE is one of the seven (owner, 2026-10-23); the outcome reading (Handed Over …) is its secondary line */
+    state: p.status,
+    secondaryState: outcome === p.status ? '' : outcome,
     overageCount: p.overages.length,
     overdue,
     merchant: db.stores.find((s) => s.code === p.storeCode)?.party.businessName || p.storeCode,
@@ -643,11 +642,11 @@ export function toPickupRow(
  */
 /* A pickup leaves the planning queue once it is on a trip OR handed to a 3PL carrier —
    a carrier-run collection is never routed on our fleet. */
-/* owner, 2026-09-25: ONLY unplanned requests — Requested, on no trip, not on a
-   3PL carrier. A request awaiting slot confirmation still shows; its routing
+/* owner, 2026-09-25: ONLY unplanned requests — Pickup Requested, on no trip, not on a
+   3PL carrier (a Created DRAFT is not raised, so it is never planned — owner, 2026-10-22). A request awaiting slot confirmation still shows; its routing
    items are disabled with the reason by the prActions matrix. */
 export const isPendingPickup = (p: GrowPickupRequest): boolean =>
-  p.status === 'Requested' && !p.tripId && p.carrierMode !== 'CARRIER'
+  p.status === 'Pickup Requested' && !p.tripId && p.carrierMode !== 'CARRIER'
 
 /* ------------------------------------------------------------ the queue ----- */
 

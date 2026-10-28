@@ -24,7 +24,7 @@
  * the user has hidden there is hidden here.
  */
 import { addPickupsToBestRoute } from '../LocalControlTower/bestRoute'
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import './pfpChrome.css'
 import { toast } from '../../nueva/toast'
@@ -33,7 +33,7 @@ import { toast } from '../../nueva/toast'
 import { ClearFilters, ColumnChooser, DateRange, FilterLine, SearchBox } from '../../local/chrome'
 import { useColumnPrefs } from '../../local/columnPrefs'
 import { PFP_COLUMNS_CONSIGNMENT_KEY, PFP_COLUMNS_PICKUP_KEY, useViewSetup } from './viewSetup'
-import { Clock as ClockIcon, Columns3, Hourglass, History, Rows3, TriangleAlert, type LucideIcon, ChevronDown as OpenChevron, ChevronRight as ClosedChevron, Truck } from 'lucide-react'
+import { Clock as ClockIcon, X, Columns3, Hourglass, History, Rows3, TriangleAlert, type LucideIcon, ChevronDown as OpenChevron, ChevronRight as ClosedChevron, Truck } from 'lucide-react'
 import { useGrowOrders, growOrderActions } from '../../growOrders/store'
 import type { PrAction } from '../../growOrders/prActions'
 import { isPickupEligible } from '../../growOrders/tabs'
@@ -61,6 +61,8 @@ import {
   PlanRouteModal, RaiseExceptionModal, RtoConfirmModal, ScheduleModal,
 } from './modals'
 import ViewConsignment from './ViewConsignment'
+import AllocateCarrierDialog from './AllocateCarrierDialog'
+import { Button } from '../../nueva/components'
 import ViewPickup from './ViewPickup'
 import {
   ArrowRight, Barbell, Biohazard, CaretDown, CaretDownSolid, CaretUpSolid, ChevronLeft,
@@ -144,8 +146,8 @@ const quickTest = (key: QuickKey, r: UnifiedRow): boolean => {
   if (key === 'pickup') return awaitingPickup(r)
   if (isPickupRow(r)) {
     if (key === 'failed') return !!r.exception
-    if (key === 'inbound') return r.request.status !== 'Completed'
-    if (key === 'scheduling') return r.request.status === 'Requested'
+    if (key === 'inbound') return r.request.status !== 'Pickedup'
+    if (key === 'scheduling') return r.request.status === 'Pickup Requested'
     return r.overdue
   }
   if (key === 'failed') return !!r.exception
@@ -281,13 +283,17 @@ type PopKind = 'state' | 'prStatus' | 'funnel' | 'settings' | 'pagesize' | 'view
  *    measured: filter row (… · Quick Filter), the Carriers / Categories cards,
  *    the list toolbar (search · Exceptions · four totals · hint · icons) — plus
  *    the owner's Shipments / Pickups / All strip above the filter row.
+ *  - `scan` (`/local/pending-for-planning-scan`, SED-14605 · RCBC) — production's chrome (the replica's rows, Merchant and
+ *    Order Type back in the funnel as on production) with a SCAN field in place of search: every scan (or pasted list) is checked against the listing and APPENDS its consignment to the table, ticked,
+ *    so a carrier can be allocated to what was scanned; Clear beside the field empties the list.
  * The data, filters, table, selection panel, popups and overlays are shared.
  */
-export type PfpVariant = 'current' | 'replica'
+export type PfpVariant = 'current' | 'replica' | 'scan'
 
 const PFP_BASE: Record<PfpVariant, string> = {
   current: '/local/pending-for-planning',
   replica: '/local/pending-for-planning-replica',
+  scan: '/local/pending-for-planning-scan',
 }
 
 export default function LocalPendingForPlanning({ variant: variantProp }: { variant?: PfpVariant } = {}) {
@@ -300,6 +306,9 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
   const pickupsOn = pickupCfg.enabled
   const variant: PfpVariant = variantProp ?? 'current'
   const replica = variant === 'replica'
+  const scanMode = variant === 'scan'
+  /* the Scan page wears production's chrome (owner, 2026-10-21: "exactly like this production one") — the replica's rows */
+  const prodChrome = replica || scanMode
   const basePath = PFP_BASE[variantProp ?? 'current']
   const nav = useNavigate()
   const { search } = useLocation()
@@ -319,6 +328,15 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
   const [prStatusDraft, setPrStatusDraft] = useState<string[]>([])
   const [funnel, setFunnel] = useState<Record<string, string>>({})
   const [q, setQ] = useState('')
+  /* SED-14605 Scan page: what was scanned (row ids, in scan order), the last scan's result, the row to flash, the carrier popup */
+  const [scanned, setScanned] = useState<string[]>([])
+  const [scanText, setScanText] = useState('')
+  const [scanMsg, setScanMsg] = useState<{ tone: 'success' | 'warning' | 'danger'; text: string } | null>(null)
+  const [flash, setFlash] = useState<string | null>(null)
+  const [allocating, setAllocating] = useState<LocalConsignmentRow[] | null>(null)
+  /* the Scan page keeps the selection panel shut while scanning (every scan ticks a row); More actions opens it */
+  const [scanPanel, setScanPanel] = useState(false)
+  const scanInput = useRef<HTMLInputElement>(null)
   const [exception, setException] = useState('')
   const [carrier, setCarrier] = useState('')
   const [flag, setFlag] = useState<CategoryFlag | ''>('')
@@ -409,11 +427,11 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
   const awaitingMode = pickupsOn && !fixture && quick === 'pickup'
   const consView = awaitingMode || consFor(tab, true)
   const urlGroup = params.get('group')
-  const grouped = consView && !awaitingMode && (urlGroup ? urlGroup !== 'none' : vs.grouped)
+  const grouped = !scanMode && consView && !awaitingMode && (urlGroup ? urlGroup !== 'none' : vs.grouped)
   const group: GroupBy = consView ? 'none' : 'pr'
   const viewFor = (t: TabKey, g: GroupBy, cons: boolean): ColumnView =>
     cons ? 'firstMileConsignment' : viewOf(t, g)
-  const view: ColumnView = fixture || !pickupsOn ? 'consignment' : viewFor(tab, group, consView)
+  const view: ColumnView = fixture || !pickupsOn || scanMode ? 'consignment' : viewFor(tab, group, consView)
   /* owner, 2026-09-25: the filter line follows the tab's ROW KIND — pickup
      requests get the Pickup page's grammar, consignments the staging set, All
      the common set (see FILTER_DIMS) */
@@ -486,9 +504,8 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
   const filtersOn = !!(from || to || stateSel.length || prStatusSel.length || q || exception || carrier || flag || quick
     || typeSel || Object.values(funnel).some(Boolean))
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
-    return tabRows.filter((r) => {
+  /** every filter on the line except search — the list uses it with search, the Scan page checks scans against it */
+  const passesFilters = useCallback((r: UnifiedRow): boolean => {
       const pickup = isPickupRow(r)
       /* a pickup-only filter (Pickup Status) leaves only pickups, on every leg and view */
       if (prStatusSel.length && (!pickup || !prStatusSel.some((st) => matchesStatus(r.request, st)))) return false
@@ -533,10 +550,18 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
         }
       }
 
-      if (needle && !matchesSearch(r, needle)) return false
       return true
-    })
-  }, [tabRows, from, to, stateSel, prStatusSel, exception, quick, flag, carrier, funnel, q, typeSel])
+  }, [from, to, stateSel, prStatusSel, exception, quick, flag, carrier, funnel, typeSel])
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return tabRows.filter((r) => passesFilters(r) && (!needle || matchesSearch(r, needle)))
+  }, [tabRows, passesFilters, q])
+
+  /* SED-14605 — the Scan page checks every scan against THIS listing: every consignment in the queue (both legs, the ones
+     still waiting for a pickup included) that passes the filters on the line. Pickup requests are not scanned here. */
+  const scanListing = useMemo(() => (scanMode ? all.filter((r): r is LocalConsignmentRow => !isPickupRow(r) && passesFilters(r)) : []),
+    [scanMode, all, passesFilters])
 
   /* the tab counts: the open tab = what it lists after ITS filters; the others
      = their rows under what survives a tab switch (Merchant + search) */
@@ -548,7 +573,7 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
   }, [all, filtered, tab, group, q, funnel.Merchant])
 
   /** what the table actually renders — the fixture short-circuits every filter */
-  const display = useMemo<DisplayRow[]>(() => {
+  const listDisplay = useMemo<DisplayRow[]>(() => {
     if (fixture) return STAGING_FIXTURE_ROWS.map(fixtureToDisplay)
     /* no sort chosen: what is due first comes first (First Mile Ops 2026-10-07) — a pickup by its window start, a consignment by its
        ship-by day, a pickup ahead of a consignment due the same day; the Last Mile tab keeps its own order */
@@ -606,6 +631,22 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
     }))
   }, [fixture, filtered, sort, cellCtx, tab, grouped, consView])
 
+  /* the Scan page's table: the scanned consignments still in the listing, flat, in the order they were scanned (appended) */
+  const scanDisplay = useMemo<DisplayRow[]>(() => {
+    if (!scanMode) return []
+    const byId = new Map(scanListing.map((r) => [r.id, r]))
+    const rows = scanned.flatMap((id) => { const r = byId.get(id); return r ? [toDisplay(r, cellCtx)] : [] })
+    if (!sort) return rows
+    const { key, dir } = sort
+    return [...rows].sort((a, b) => {
+      const x = a.cells[key] ?? '', y = b.cells[key] ?? ''
+      const n = Number(x), m = Number(y)
+      const cmp = Number.isFinite(n) && Number.isFinite(m) && x !== '' && y !== '' ? n - m : x.localeCompare(y)
+      return dir === 'asc' ? cmp : -cmp
+    })
+  }, [scanMode, scanListing, scanned, cellCtx, sort])
+  const display = scanMode ? scanDisplay : listDisplay
+
   /* The fixture is ONE page of staging's 101 rows, so its pager must be
      staging's — five numbered buttons and an enabled next arrow. Deriving the
      count from the 20 rows on screen would show a single page and leave the
@@ -619,16 +660,18 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
      it covers are the same parcels seen twice, so summing both double-counts. */
   const stats = useMemo(() => {
     if (fixture) return FIXTURE_STATS
-    const cons = filtered.filter((r): r is LocalConsignmentRow => !isPickupRow(r))
+    /* the Scan page totals what was scanned (and is still listed), not the whole queue */
+    const base: UnifiedRow[] = scanMode ? scanListing.filter((r) => scanned.includes(r.id)) : filtered
+    const cons = base.filter((r): r is LocalConsignmentRow => !isPickupRow(r))
     const weight = Math.round(cons.reduce((n, r) => n + r.weightKg, 0) * 100) / 100
     const volume = Math.round(cons.reduce((n, r) => n + r.volumeMm3, 0) * 10) / 10
     return {
-      totalOrders: String(filtered.length),
+      totalOrders: String(base.length),
       weight: `${weight.toLocaleString()} kg`,
       volume: `${volume.toLocaleString()} mm³`,
       palletSpaces: String(cons.reduce((n, r) => n + (r.palletSpaces ?? 1), 0)),
     }
-  }, [fixture, filtered])
+  }, [fixture, filtered, scanMode, scanListing, scanned])
 
   /* ------------------------------------------------------------ selection -- */
 
@@ -722,6 +765,65 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
     toast.success(msg)
   }
 
+  /* ---- SED-14605 scanning ---- */
+  /** a scanned key → its consignment row, over the WHOLE queue: order / reference / tracking number; a package barcode
+   *  (`<order>-P<n>`) resolves to its consignment */
+  const scanIndex = useMemo(() => {
+    const m = new Map<string, string>()
+    if (!scanMode) return m
+    for (const r of consignmentRows) for (const k of [r.orderNumber, r.referenceNumber, r.order.trackingNumber]) if (k) m.set(k.trim().toUpperCase(), r.id)
+    return m
+  }, [scanMode, consignmentRows])
+  /** one scan, or a pasted list (one scan per line / comma): each is checked against the listing; new ones are APPENDED and ticked */
+  const scan = (raw: string) => {
+    const keys = raw.split(/[\s,;]+/).map((k) => k.trim()).filter(Boolean)
+    if (!keys.length) return
+    const listed = new Set(scanListing.map((r) => r.id))
+    const next = [...scanned]
+    const addedIds: string[] = []
+    let dupes = 0, bad = 0, last: string | null = null, why = ''
+    for (const key of keys) {
+      const K = key.toUpperCase()
+      const id = scanIndex.get(K) ?? scanIndex.get(K.replace(/-P\d+$/, ''))
+      if (!id) {
+        bad++
+        const pr = all.some((r) => isPickupRow(r) && r.reference.toUpperCase() === K)
+        const order = db.orders.find((o) => o.orderNumber.toUpperCase() === K || (o.trackingNumber ?? '').toUpperCase() === K)
+        why = pr ? `${key} is a pickup request — a carrier is allocated per consignment`
+          : order ? `${key} is not pending for planning (${order.status})` : `${key} — not found`
+        continue
+      }
+      if (next.includes(id)) { dupes++; last = id; why = `${key} is already scanned (#${next.indexOf(id) + 1})`; continue }
+      if (!listed.has(id)) { bad++; why = `${key} is not in this listing — check the filters`; continue }
+      next.push(id); addedIds.push(id); last = id
+    }
+    setScanned(next)
+    setScanPanel(false)
+    if (addedIds.length) setSelected((s) => new Set([...s, ...addedIds]))
+    if (last && !sort) setPage(Math.floor(next.indexOf(last) / pageSize) + 1)
+    if (last) { setFlash(last); window.setTimeout(() => setFlash((f) => (f === last ? null : f)), 1600) }
+    const one = keys.length === 1
+    setScanMsg(one
+      ? addedIds.length ? { tone: 'success', text: `${keys[0]} added` } : { tone: dupes ? 'warning' : 'danger', text: why }
+      : { tone: bad ? 'warning' : 'success', text: [`${addedIds.length} added`, dupes && `${dupes} already scanned`, bad && `${bad} not added — last: ${why}`].filter(Boolean).join(' · ') })
+  }
+  const clearScans = () => {
+    setSelected((s) => new Set([...s].filter((id) => !scanned.includes(id))))
+    setScanned([]); setScanMsg(null); setScanText(''); setPage(1)
+    scanInput.current?.focus()
+  }
+  const refreshScans = () => {
+    const live = new Set(all.map((r) => r.id))
+    const gone = scanned.filter((id) => !live.has(id))
+    if (!gone.length) { toast.success('Scanned list is up to date.'); return }
+    setScanned((s) => s.filter((id) => live.has(id)))
+    setSelected((sel) => { const n = new Set(sel); gone.forEach((id) => n.delete(id)); return n })
+    toast.success(`${gone.length} consignment${gone.length === 1 ? '' : 's'} no longer pending for planning — removed from the list.`)
+  }
+  const scanHidden = scanMode ? scanned.length - scanDisplay.length : 0
+  const scanTicked = scanMode ? scanListing.filter((r) => scanned.includes(r.id) && selected.has(r.id)) : []
+  const carrierChoices = carriers.filter((c) => c && c !== 'No Carrier' && c !== '-')
+
   /* pickup requests and consignments can be ticked TOGETHER (owner, 2026-10-08) — a mixed selection offers Plan For Routing · CSV · Cancel */
   const pickupIdSet = useMemo(() => new Set(all.filter(isPickupRow).map((r) => r.id)), [all])
   const toggleRow = (id: string) => setSelected((s) => {
@@ -804,10 +906,15 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
   const [consPick, setConsPick] = useColumnPrefs(PFP_COLUMNS_CONSIGNMENT_KEY, CONSIGNMENT_TAB_COLUMNS.filter((c) => !['_select', '_flags', '_pad'].includes(c.key)).map((c) => c.key), CONSIGNMENT_TAB_COLUMNS.map((c) => c.key))
   const pick = (cols: typeof PR_VIEW_COLUMNS, keep: string[]) =>
     cols.filter((c) => c.key === '_select' || c.key === '_flags' || c.key === '_pad' || keep.includes(c.key))
-  const columns = view === 'pickup' ? pick(PR_VIEW_COLUMNS, prPick)
+  const listColumns = view === 'pickup' ? pick(PR_VIEW_COLUMNS, prPick)
     : view === 'common' ? COMMON_COLUMNS
       : isConsGrid && !fixture && pickupsOn ? pick(tabColumns, consPick)
         : tabColumns
+  /* the Scan page: production's grid — no Active Leg / Pickup No, and "Consignment Number" as production names it */
+  const columns = scanMode
+    ? listColumns.filter((c) => c.key !== 'activeLeg' && c.key !== PICKUP_NO_KEY)
+      .map((c) => (c.key === 'orderNumber' ? { ...c, label: 'Consignment Number', width: c.width + 48 } : c))
+    : listColumns
   /* the measured scroll width, less / plus what this set drops / adds against
      the measured capture (the grid keeps its measured horizontal rhythm) */
   const tableWidth = view === 'consignment' || view === 'firstMileConsignment'
@@ -874,17 +981,19 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
     <select className="pfp-select" aria-label="Exceptions" value={exception}
       data-placeholder={!exception}
       /* the replica sizes it from staging's measured rect (175 x 36) */
-      style={replica ? { width: ROLE.exceptionsSelect.rect[2], height: ROLE.exceptionsSelect.rect[3] } : undefined}
+      style={prodChrome ? { width: ROLE.exceptionsSelect.rect[2], height: ROLE.exceptionsSelect.rect[3] } : undefined}
       onChange={(e) => { setException(e.target.value); setPage(1) }}>
       <option value="">Exceptions</option>
       {EXCEPTION_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
     </select>
   )
 
+  /* production's funnel: its leg's dimensions; on the Scan page Merchant and Order Type join them, as production's row has neither */
+  const prodDims = scanMode ? ['Merchant', 'Order Type', ...FILTER_DIMS.consignment] : FILTER_DIMS[filterMode]
   const funnelControl = (
     <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
       <button type="button" className="pfp-funnel" aria-label="More filters"
-        data-active={!!((!replica && exception) || (replica ? FILTER_DIMS[filterMode] : ALL_DIMS).some((d) => funnel[d])) || undefined}
+        data-active={!!((!prodChrome && exception) || (prodChrome ? prodDims : ALL_DIMS).some((d) => funnel[d])) || undefined}
         onClick={() => setPop(pop === 'funnel' ? null : 'funnel')}>
         <Funnel size={16} />
       </button>
@@ -894,8 +1003,8 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
             {/* current page: Exceptions moved off the toolbar into the funnel
                 as its FIRST section (owner, spec §11). The replica keeps it on
                 the list toolbar, where staging has it. */}
-            {replica ? (
-              FILTER_DIMS[filterMode].map((dim) => (
+            {prodChrome ? (
+              prodDims.map((dim) => (
                 <select key={dim} className="pfp-select" value={funnel[dim] ?? ''}
                   onChange={(e) => { setFunnel((f) => ({ ...f, [dim]: e.target.value })); setPage(1) }}>
                   <option value="">{dim}</option>
@@ -972,7 +1081,25 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
       onStart={(v) => { setFrom(v); setPage(1) }} onEnd={(v) => { setTo(v); setPage(1) }} />
   )
 
-  const searchControl = (
+  const searchControl = scanMode ? (<>
+    {/* SED-14605: a scanner types the code and sends Enter; the field empties and keeps the focus for the next scan */}
+    {/* production's search box: the code stays in it, SELECTED after each scan, so the scanner's next code replaces it. Clear and
+        the count are ONE control inside its right end — "✕ Clear (n)", only while something is scanned (owner, 2026-10-21) */}
+    <div className="pfp-scanbox" data-active={scanned.length > 0 || undefined}>
+      <MagnifyingGlass size={16} />
+      <input ref={scanInput} autoFocus aria-label="Scan consignment" placeholder="Scan consignments" value={scanText}
+        onChange={(e) => setScanText(e.target.value)}
+        onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={(e) => { if (e.key === 'Enter') { scan(scanText); e.currentTarget.select() } }}
+        onPaste={(e) => { const t = e.clipboardData.getData('text'); if (/[\n\r\t,;]/.test(t)) { e.preventDefault(); scan(t); setScanText('') } }} />
+      {scanned.length > 0 && (
+        <button type="button" className="pfp-scanbox-clear" onClick={clearScans}
+          title={`Remove the ${scanned.length} scanned consignment${scanned.length === 1 ? '' : 's'} from the list`}>
+          <X size={14} strokeWidth={2.5} /> Clear ({scanned.length})
+        </button>
+      )}
+    </div>
+  </>) : (
     <SearchBox value={q} placeholder="Search orders" onChange={(v) => { setQ(v); setPage(1) }} />
   )
 
@@ -1095,7 +1222,7 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
   )
 
   /* the floating selection panel hangs from the row that carries the icons */
-  const selectionPanel = selected.size > 0 && (
+  const selectionPanel = selected.size > 0 && (!scanMode || scanPanel) && (
     <SelectionPanel
       count={selected.size}
       metrics={selMetrics}
@@ -1104,7 +1231,7 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
       profile={profile}
       pickupMetrics={pickupMetrics}
       prItems={prItems}
-      onClose={clearSelection}
+      onClose={scanMode ? () => setScanPanel(false) : clearSelection}
       onAction={(kind) => {
         /* staging actions with no local implementation (owner, 2026-09-25: the
            consignment panel carries staging's exact list) */
@@ -1121,7 +1248,8 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
           else done(routable.length ? 'Added to the best route.' : 'Nothing could be added.')
           return
         }
-        if (kind === 'carrier' || kind === 'storage' || kind === 'driver') {
+        if (kind === 'carrier') { setAllocating(selectedRows); return }
+        if (kind === 'storage' || kind === 'driver') {
           toast.info('Not available in the prototype.')
           return
         }
@@ -1212,13 +1340,13 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
   }
 
   const statList: [string, string][] = [
-    ['Total Orders', stats.totalOrders], ['Weight', stats.weight],
+    [scanMode ? 'Total Consignments' : 'Total Orders', stats.totalOrders], ['Weight', stats.weight],
     ['Volume', stats.volume], ['Pallet Spaces', stats.palletSpaces],
   ]
 
   return (
     <div className="pfp" data-variant={variant} style={cssVars} onClick={() => pop && setPop(null)}>
-      {replica ? (
+      {prodChrome ? (
         <>
           {/* -------------------------------------------- row 1: filters —
               staging's order, plus Merchant and Type after State */}
@@ -1226,8 +1354,8 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
             {dateControl}
             {filterMode === 'consignment' && stateControl}
             {filterMode === 'pickup' && prStatusControl}
-            {merchantControl}
-            {filterMode === 'consignment' && orderTypeControl}
+            {!scanMode && merchantControl}
+            {!scanMode && filterMode === 'consignment' && orderTypeControl}
             {filterMode === 'common' && typeControl}
             {funnelControl}
             <ClearFilters active={filtersOn} onClick={clearAll} />
@@ -1259,7 +1387,8 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
           <div className="pfp-toolbar">
             {searchControl}
             {exceptionsControl}
-            <div className="pfp-stats">
+            {/* the Scan page: production's one-line readouts (label value), no hint — the scan line below says what is selected */}
+            <div className="pfp-stats" data-inline={scanMode || undefined}>
               {statList.map(([label, value]) => (
                 <div key={label}>
                   <div className="pfp-stat-label">{label}</div>
@@ -1267,15 +1396,32 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
                 </div>
               ))}
             </div>
-            <span className="pfp-hint">
-              {selected.size ? `${selected.size} selected` : 'Select orders for more action'}
-            </span>
+            {!scanMode && (
+              <span className="pfp-hint">
+                {selected.size ? `${selected.size} selected` : 'Select orders for more action'}
+              </span>
+            )}
             {downloadControl}
-            {viewControl}
-            {columnsControl}
+            {!scanMode && viewControl}
+            {!scanMode && columnsControl}
             {settingsControl}
             {selectionPanel}
           </div>
+
+          {/* ------------------- the Scan page (SED-14605): the last scan's result and Allocate carrier (the count is in the box's Clear) */}
+          {scanMode && (
+            <div className="pfp-scanbar">
+              {scanHidden > 0 && <span className="pfp-scanbar-note">({scanHidden} hidden by the filters)</span>}
+              {scanMsg && <span role="status" className="pfp-scanmsg" data-tone={scanMsg.tone}>{scanMsg.text}</span>}
+              <span className="pfp-scanbar-spacer" aria-hidden />
+              {selected.size > 0 && <Button variant="outline" onClick={() => setScanPanel((v) => !v)}>{scanPanel ? 'Hide actions' : `More actions (${selected.size})`}</Button>}
+              <span title={scanTicked.length ? undefined : 'Scan or tick consignments first'}>
+                <Button disabled={!scanTicked.length} onClick={() => setAllocating(scanTicked)}>
+                  {scanTicked.length ? `Allocate carrier (${scanTicked.length})` : 'Allocate carrier'}
+                </Button>
+              </span>
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -1315,7 +1461,7 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
             {/* line 1: the scope — Leg and Pending for Pickup Request * */}
             <div className="pfp-scope">
               <div className="pfp-chipbar">{legChips}</div>
-              </div>
+            </div>
             {/* line 2: Carriers stay put; ONLY the categories scroll (owner, 2026-10-08) */}
             <div className="pfp-scope" style={{ marginTop: 8 }}>
               <div className="pfp-chipbar" data-fixed="true">
@@ -1426,7 +1572,8 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
                     </tr>
                   )}
                   {!(grouped && prId !== '' && collapsedGroups.has(prId)) && (<>
-                  <tr data-selected={selected.has(r.id)}>
+                  <tr data-selected={selected.has(r.id)}
+                    style={flash === r.id ? { outline: '2px solid var(--color-st-warning)', outlineOffset: -2 } : undefined}>
                     {columns.map((c) => (
                       <Cell key={c.key} col={c.key} row={r}
                         selected={selected.has(r.id)}
@@ -1459,8 +1606,10 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
             })}
             {paged.length === 0 && (
               <tr>
-                <td colSpan={columns.length} style={{ textAlign: 'center', color: 'var(--pfp-ink-hint)' }}>
-                  No orders match these filters.
+                <td colSpan={columns.length} style={scanMode ? { textAlign: 'left', padding: '24px 16px', color: 'var(--pfp-ink-hint)' } : { textAlign: 'center', color: 'var(--pfp-ink-hint)' }}>
+                  {scanMode
+                    ? scanned.length ? 'The scanned consignments are hidden by the filters.' : 'Scan a consignment barcode or number to start — each scan is added here.'
+                    : 'No orders match these filters.'}
                 </td>
               </tr>
             )}
@@ -1485,7 +1634,7 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
           {/* the queue totals, moved off the toolbar into the footer (owner
               request) so they no longer cost a row — the replica keeps them
               on its toolbar, where staging has them */}
-          {!replica && (
+          {!prodChrome && (
             <span className="pfp-summary"
               title={`Total Orders ${stats.totalOrders} · Weight ${stats.weight} · Volume ${stats.volume} · Pallet Spaces ${stats.palletSpaces}`}>
               {stats.totalOrders} orders · {stats.weight} · {stats.volume} · {stats.palletSpaces} pallets
@@ -1505,6 +1654,13 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
             <ChevronRight size={20} />
           </button>
         </nav>
+
+        {/* production's Refresh; on the Scan page it re-checks the scanned list — a consignment planned / moved on since its scan drops out */}
+        {scanMode && (
+          <button type="button" className="pfp-refresh" onClick={refreshScans}>
+            <Refresh size={16} /> Refresh
+          </button>
+        )}
 
       </div>
 
@@ -1590,6 +1746,11 @@ export default function LocalPendingForPlanning({ variant: variantProp }: { vari
             }
             if (failed.length) toast.error(`${failed.join(', ')} can no longer take consignments — nothing added there.`)
           }} />
+      )}
+
+      {allocating && (
+        <AllocateCarrierDialog rows={allocating} carriers={carrierChoices} onClose={() => setAllocating(null)}
+          onDone={(n, c) => { setAllocating(null); toast.success(`${n} consignment${n === 1 ? '' : 's'} allocated to ${c}.`) }} />
       )}
 
       {/* the detail is an OVERLAY over this list, exactly as staging renders it */}
@@ -1749,7 +1910,7 @@ function Cell({ col, row, selected, onToggle, onOpen, extra }: {
  */
 /** the replica's glyph per pickup-request action (extracted SVGs only) */
 const PR_GLYPH: Partial<Record<PrAction, React.JSX.Element>> = {
-  planCollection: <RoutePath size={16} />, addToRoute: <RoutePath size={16} />, assignCarrier: <Send size={16} />,
+  raise: <Send size={16} />, planCollection: <RoutePath size={16} />, addToRoute: <RoutePath size={16} />, assignCarrier: <Send size={16} />,
   switchToFleet: <Send size={16} />, reschedule: <Clock size={16} />, addConsignments: <PackageGlyph size={16} />,
   split: <Stack size={16} />, confirmSlot: <CalendarCheck size={16} />, reattempt: <Refresh size={16} />,
   markPickedUp: <ListChecks size={16} />, markFailed: <WarningTriangle size={16} />, closeHandover: <ListChecks size={16} />,

@@ -31,6 +31,7 @@ import {
 } from '../config/pickupModule'
 import { AUTO_PICKUP_TRIGGER_EVENTS, triggerEventTitle } from '../growOrders/fareyeEvents'
 import { TriggerEventOption } from '../growOrders/TriggerEventOption'
+import { PR_CUTOFFS, toCutoff } from '../growOrders/types'
 import {
   CONSIGNMENT_FIELDS, FIELD_SECTIONS, cacheFormBehavior, DEFAULT_FORM_BEHAVIOR,
   type FormBehavior,
@@ -464,7 +465,7 @@ const PICKUP_DEFAULT_USER_TYPES = ['Admin', 'Manager']
 const SCAN_MODE_OPTIONS = [{ name: 'Driver', code: 'driver' }, { name: 'Hub', code: 'hub' }, { name: 'Both', code: 'both' }]
 const OVERAGE_OPTIONS = [{ name: 'Hold', code: 'hold' }, { name: 'Auto-create', code: 'auto-create' }, { name: 'Reject', code: 'reject' }]
 const POD_OPTIONS = [{ name: 'Required', code: 'required' }, { name: 'Optional', code: 'optional' }, { name: 'Off', code: 'off' }]
-const STAGE_OPTIONS = [{ name: 'Requested', code: 'Requested' }, { name: 'Planned', code: 'Planned' }, { name: 'Assigned', code: 'Assigned' }]
+const STAGE_OPTIONS = PR_CUTOFFS.map((c) => ({ name: c, code: c }))
 const MULTI_PR_OPTIONS = [
   { name: 'One open per location', code: 'ONE_OPEN_PER_LOCATION' },
   { name: 'One per slot', code: 'ONE_PER_SLOT' },
@@ -716,7 +717,7 @@ function PickupGeneralTab({ draft, patch }: {
           </FeatureRow>
           {fs.mode !== 'auto' && (
           <FeatureRow label="Allow add-to-existing until" hint="Last status at which consignments can join an existing request.">
-            <RadioRow options={STAGE_OPTIONS} value={String(fs.allowAddToExistingUntil ?? '')} onChange={(v) => set('allowAddToExistingUntil', v)} />
+            <RadioRow options={STAGE_OPTIONS} value={String(toCutoff(fs.allowAddToExistingUntil) ?? '')} onChange={(v) => set('allowAddToExistingUntil', v)} />
           </FeatureRow>
           )}
           <FeatureRow label="Reschedule window (days)" hint="How far ahead a pickup can be rescheduled.">
@@ -743,7 +744,7 @@ function PickupGeneralTab({ draft, patch }: {
           <ProofOfPickupRows value={pod} onChange={(next) => set('podRequirements', next)} />
           {fs.mode !== 'auto' && (
           <FeatureRow label="Merchant can cancel until" hint="Last status at which a merchant may cancel a request.">
-            <RadioRow options={STAGE_OPTIONS} value={String(fs.merchantCancelUntil ?? '')} onChange={(v) => set('merchantCancelUntil', v)} />
+            <RadioRow options={STAGE_OPTIONS} value={String(toCutoff(fs.merchantCancelUntil) ?? '')} onChange={(v) => set('merchantCancelUntil', v)} />
           </FeatureRow>
           )}
           <FeatureRow label="Auto-reschedule on failure" hint="Re-raise a failed pickup for the next business day while attempts remain.">

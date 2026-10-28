@@ -13,27 +13,29 @@
  */
 import { useState, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { FileText, History, Info, Link2, PackageCheck, Plus, ScanBarcode, Trash2, Truck } from 'lucide-react'
+import { FileText, History, Info, PackageCheck, Plus, ScanBarcode, Send, Trash2 } from 'lucide-react'
 import {
   Button, EmptyState, KebabMenu, Panel, SimpleTable, SlideOver, SlideOverSections, StatusPill, type MenuItem, type SlideOverSection,
 } from '../../nueva/components'
 import { toast } from '../../nueva/toast'
 import { growOrderActions, useGrowOrders } from '../../growOrders/store'
 import type { GrowOrder, GrowPickupRequest } from '../../growOrders/types'
-import { handoverExpected, handoverReconciled, isPartiallyPicked, isPickupEligible } from '../../growOrders/tabs'
+import { handoverReconciled, isDraftPr, isPartiallyPicked, isPickupEligible } from '../../growOrders/tabs'
 import { prActionState, type PrAction } from '../../growOrders/prActions'
 import { usePickupModuleConfig } from '../../config/pickupModule'
 import { PICKUP_OUTCOME_LABEL, pickupOutcomeFor } from '../../growOrders/reasonPolicy'
 import { NO_ORDERS_REASON } from '../../growOrders/pickupReasons'
 import { planningActions, usePlanning } from '../LocalPFP/planningStore'
+import { toConsignmentRow } from '../LocalPFP/adapter'
+import { piecesOf, type PieceView } from '../LocalConsignments/viewModel'
 import {
   AddConsignmentsDialog, AssignCarrierDialog, CloseHandoverDialog, ManualPickupDialog, ReasonDialog, RescheduleDialog,
 } from './dialogs'
 import { AddToRouteDialog } from '../LocalControlTower/addToRouteDialog'
 import { SplitPickupDialog } from './bookingCards'
 import {
-  can, consignmentsLabel, dropLabel, duplicateIds, earliestFor, fmtStamp, fmtWindow, merchantOfPr, pickupPointAddress,
-  pickupPointName, prTypeLabel, reasonText, referenceChips, statusLabel, statusTags, weightLabel, windowTag, type Tone,
+  consignmentsLabel, dropLabel, duplicateIds, earliestFor, fmtStamp, fmtWindow, merchantOfPr, pickupPointAddress,
+  pickupPointName, prTypeLabel, reasonText, referenceChips, statusLabel, statusTags, weightLabel, windowTag,
 } from './prModel'
 
 type DialogKind = 'add' | 'split' | 'reschedule' | 'cancel' | 'fail' | 'manual' | 'route' | 'carrier' | 'close' | null
@@ -55,22 +57,6 @@ function Pairs({ pairs }: { pairs: [string, ReactNode][] }) {
   )
 }
 
-/** One section of the Pickup outcome panel: `Booked (3)` + an optional action, then its table or a muted line. */
-function OutcomeSection({ title, count, action, empty = 'None', children }: {
-  title: string; count: number; action?: ReactNode; empty?: string; children: ReactNode
-}) {
-  return (
-    <section className="mt-3 border-t border-line pt-3 first-of-type:border-t-0">
-      <div className="flex items-center gap-2 px-5 pb-2">
-        <h3 className="text-[13px] font-bold text-ink">{title} ({count})</h3>
-        {action && <span className="ml-auto">{action}</span>}
-      </div>
-      {count === 0 ? <p className="px-5 pb-1 text-[13px] text-ink-3">{empty}</p> : children}
-    </section>
-  )
-}
-
-const tick = (on: boolean) => (on ? <span className="font-bold text-success-fg">✓</span> : <span className="text-warm-400">—</span>)
 
 /* ------------------------------------------------------------- the page ---- */
 
@@ -102,7 +88,7 @@ export default function PickupRequestDetail({ id: idProp, onClose }: { id?: stri
 function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
   const nav = useNavigate()
   const db = useGrowOrders()
-  const plan = usePlanning()
+  usePlanning()   // re-render when its trip changes (the On route tag)
   const cfg = usePickupModuleConfig()
   const [dialog, setDialog] = useState<DialogKind>(null)
   const close = () => setDialog(null)
@@ -111,9 +97,7 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
   const prById = new Map(db.pickupRequests.map((p) => [p.id, p]))
   const s = statusLabel(pr)
   const tags = statusTags(pr, duplicateIds(db.pickupRequests), new Date(), (i) => prById.get(i))
-  const trip = pr.tripId ? plan.trips.find((t) => t.id === pr.tripId) : undefined
-  const stop = trip?.stops.find((x) => x.kind === 'pickup' && x.prId === pr.id)
-  const attempted = pr.status === 'Completed' || pr.status === 'Pickup Failed'
+  const attempted = pr.status === 'Pickedup' || pr.status === 'Pickup Failed'
   const on = cfg.enabled
 
   /* scenario 13: a partial pickup released what it left behind — book exactly
@@ -146,7 +130,9 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
     return { label, onClick, tone, disabled: !g.enabled, reason: g.reason }
   }
   const threePl = pr.carrierMode === 'CARRIER'
+  const raise = () => { if (growOrderActions.raisePickupRequest(pr.id)) toast.success(`${pr.number} raised — now Pickup Requested.`) }
   const maybe: (MenuItem | false | null | '')[] = !on ? [] : [
+    isDraftPr(pr.status) && act('raise', 'Raise pickup request', raise),
     act('addConsignments', 'Add shipments', () => setDialog('add')),
     act('reschedule', 'Reschedule', () => setDialog('reschedule')),
     act('split', 'Split pickup request', () => setDialog('split')),
@@ -181,6 +167,7 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
       if (growOrderActions.carrierAccepted(pr.id)) toast.success(`${pr.carrierName ?? 'Carrier'} accepted the manifest — ${pr.number} handed over.`)
       else toast.error(`${pr.number} has nothing to hand over — it fails as "No orders to collect".`)
     }),
+    act('closeHandover', 'Close handover', () => setDialog('close')),
     act('markFailed', 'Mark Pickup Failed', () => setDialog('fail'), 'danger'),
     act('cancel', 'Cancel pickup', () => setDialog('cancel'), 'danger'),
   ]
@@ -190,21 +177,10 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
   const booked = pr.orderIds.map((i) => byId.get(i)).filter((o): o is GrowOrder => !!o)
   const extras = db.orders.filter((o) => o.pickedInRequestId === pr.id && !pr.orderIds.includes(o.id))
   const picked = new Set(pr.pickedOrderIds)
-  const rowState = (o: GrowOrder): { label: string; tone: Tone } => {
-    /* an order created for one of this request's overage scans points here but was never booked elsewhere */
-    if (picked.has(o.id)) return { label: pr.orderIds.includes(o.id) || o.pickupRequestId === pr.id ? 'Picked' : 'Picked here (booked elsewhere)', tone: 'success' }
-    if (o.pickedInRequestId && o.pickedInRequestId !== pr.id) {
-      return { label: `Picked in ${prById.get(o.pickedInRequestId)?.number ?? 'another PR'}`, tone: 'info' }
-    }
-    if (pr.status === 'Cancelled') return { label: 'Released', tone: 'neutral' }
-    if (attempted) return { label: 'Not picked', tone: 'warning' }
-    return { label: 'To pick', tone: 'neutral' }
-  }
   const pickedRows = [...booked.filter((o) => picked.has(o.id)), ...extras.filter((o) => picked.has(o.id))]
   const notPickedRows = attempted ? booked.filter((o) => !picked.has(o.id)) : []
   const numberOf = (id: string) => prById.get(id)?.number ?? id
-  const { driverScanned, hubScanned } = pr.handover
-  const dScan = new Set(driverScanned), hScan = new Set(hubScanned)
+  const dScan = new Set(pr.handover.driverScanned)
   const dev = import.meta.env.DEV
   const canScan = pr.status !== 'Cancelled' && pr.status !== 'Pickup Failed'
 
@@ -222,39 +198,55 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
     return out
   }
 
-  /* one table shape for Booked / Picked / Not picked */
-  const outcomeTable = (rows: GrowOrder[]) => (
-    <SimpleTable<GrowOrder> rows={rows} rowKey={(o) => o.id}
-      onRowClick={(o) => nav(`/local/consignments/${o.id}`)}
+  /* ONE table (owner, 2026-10-22: "make columns and status will come in it, no need for separate sections"): every
+     consignment booked here, every one picked here though booked elsewhere, then the overage scans — the Status column
+     says which */
+  const outcomeRows = [...booked, ...extras.filter((o) => picked.has(o.id))]
+  /* owner, 2026-10-23: a plain table, one row per PACKAGE with its consignment beside it — no nesting — and the package's
+     own details, exactly as the consignment page lists them (LocalConsignments/viewModel.piecesOf). The consignment's
+     remove / scan actions sit on its first package row only */
+  type PkgRow = PieceView & { o: GrowOrder; first: boolean }
+  const pkgRows: PkgRow[] = outcomeRows.flatMap((o) => piecesOf(toConsignmentRow(o, db), o).map((pc, i) => ({ ...pc, o, first: i === 0 })))
+  const packageCount = pkgRows.length
+  const nowrap = (v: ReactNode) => <span className="whitespace-nowrap">{v}</span>
+  const outcomeTable = (rows: PkgRow[]) => (
+    <SimpleTable<PkgRow> rows={rows} rowKey={(r) => r.id}
+      onRowClick={(r) => nav(`/local/consignments/${r.o.id}`)}
       columns={[
-        { label: 'Shipment', render: (o) => {
+        /* the PACKAGE's own number (`<consignment>-P<n>`) — a consignment's carrier tracking number is one for all its packages */
+        /* headers wrap to at most TWO lines (owner, 2026-10-23): a non-breaking space binds the words that must stay together */
+        { label: 'Package\u00a0Tracking Number', render: (r) => <span className="whitespace-nowrap font-mono text-[12px] font-bold text-ink">{r.id}</span> },
+        { label: 'Consignment Number', render: ({ o }) => {
           const m = markers(o)
           return (
             <span className="flex flex-wrap items-baseline gap-x-2">
               <Link to={`/local/consignments/${o.id}`} onClick={(e) => e.stopPropagation()}
-                className="font-mono text-[12px] font-bold text-brand-500 hover:text-brand-600">{o.orderNumber}</Link>
+                className="whitespace-nowrap font-mono text-[12px] font-bold text-brand-500 hover:text-brand-600">{o.orderNumber}</Link>
               {m.length > 0 && <span className="text-[12px] text-ink-3">{m.map((x, i) => <span key={i}>{i > 0 && ' · '}{x}</span>)}</span>}
             </span>
           )
         } },
-        { label: 'Receiver', render: (o) => o.receiver.name || '—' },
-        { label: 'Weight', align: 'right', render: (o) => `${(o.pkg.weightKg || 0).toFixed(1)} kg` },
-        { label: 'Status', render: (o) => { const x = rowState(o); return <StatusPill label={x.label} tone={x.tone} /> } },
-        { label: 'Scans', render: (o) => (
-          <span className="inline-flex items-center gap-2 whitespace-nowrap text-[12px] text-ink-2">
-            <span>driver {tick(dScan.has(o.id))}</span><span>hub {tick(hScan.has(o.id))}</span>
-          </span>
-        ) },
-        { label: '', align: 'right', render: (o) => (
+        { label: 'State', render: (r) => nowrap(r.state) },
+        { label: 'Product Name', render: (r) => nowrap(r.productName) },
+        { label: 'SKU Code', render: (r) => <span className="whitespace-nowrap font-mono text-[12px]">{r.skuCode}</span> },
+        { label: 'SKU Description', render: (r) => <span className="block max-w-[220px] truncate" title={r.skuDescription}>{r.skuDescription}</span> },
+        { label: 'SKU Quantity', align: 'right', render: (r) => r.skuQuantity },
+        { label: 'Volume', align: 'right', render: (r) => nowrap(`${r.volumeMm3.toLocaleString()} mm³`) },
+        { label: 'Weight', align: 'right', render: (r) => nowrap(`${r.weightKg} kg`) },
+        { label: 'Pallet Spaces', align: 'right', render: (r) => r.palletSpaces },
+        { label: 'L\u00a0*\u00a0B\u00a0*\u00a0H', render: (r) => nowrap(r.dims) },
+        { label: '', align: 'right', render: ({ o, first }) => (first ? (
           <span className="inline-flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
             {dev && on && canScan && !dScan.has(o.id) && (
-              <Button size="sm" variant="ghost" icon={<ScanBarcode size={13} />}
+              <button type="button" className="grid h-7 w-7 place-items-center rounded-md text-ink-3 hover:bg-warm-100 hover:text-ink"
+                title={`Simulate driver scan of ${o.orderNumber} (demo)`} aria-label={`Simulate driver scan for ${o.orderNumber}`}
                 onClick={() => { growOrderActions.driverScan(pr.id, o.id); toast.info(`Driver scan simulated for ${o.orderNumber}.`) }}>
-                Simulate driver scan
-              </Button>
+                <ScanBarcode size={15} />
+              </button>
             )}
             {on && gate('removeConsignment').enabled && pr.orderIds.includes(o.id) && !picked.has(o.id) && (
-              <Button size="sm" variant="ghost" icon={<Trash2 size={13} />}
+              <button type="button" className="grid h-7 w-7 place-items-center rounded-md text-ink-3 hover:bg-danger-bg hover:text-danger-fg"
+                title={`Remove consignment ${o.orderNumber} (all its packages) from this request`} aria-label={`Remove ${o.orderNumber}`}
                 onClick={() => {
                   growOrderActions.detachOrderFromPickup(pr.id, o.id)
                   /* an order-backed request left with nothing to collect ends, as on Grow (a reserved one keeps its slot) */
@@ -263,27 +255,14 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
                     toast.success(`${o.orderNumber} removed — ${pr.number} had nothing left to collect and is cancelled.`)
                   } else toast.success(`${o.orderNumber} removed — it waits for a pickup again.`)
                 }}>
-                Remove
-              </Button>
+                <Trash2 size={15} />
+              </button>
             )}
           </span>
-        ) },
+        ) : null) },
       ]} />
   )
 
-  /* ----------------------------------------------------------- handover -- */
-  const universe = [...new Set([...handoverExpected(pr), ...driverScanned, ...hubScanned])]
-  const buckets: { key: string; label: string; hint: string; ids: string[]; tone: Tone }[] = [
-    { key: 'matched', label: 'Matched', hint: 'driver and hub both scanned', ids: universe.filter((i) => dScan.has(i) && hScan.has(i)), tone: 'success' },
-    { key: 'driver', label: 'Driver only', hint: 'left the dock, not seen at the hub', ids: universe.filter((i) => dScan.has(i) && !hScan.has(i)), tone: 'warning' },
-    { key: 'hub', label: 'Hub only', hint: 'at the hub, no driver scan', ids: universe.filter((i) => !dScan.has(i) && hScan.has(i)), tone: 'info' },
-    { key: 'never', label: 'Never scanned', hint: 'expected, no scan yet', ids: universe.filter((i) => !dScan.has(i) && !hScan.has(i)), tone: 'danger' },
-  ]
-  const reconciled = handoverReconciled(pr)
-  const modeText = { driver: 'Driver scan', hub: 'Hub scan', both: 'Driver + hub scan' }[pr.handover.mode]
-
-  const parent = pr.parentPrId ? prById.get(pr.parentPrId) : undefined
-  const retry = pr.reattemptPrId ? prById.get(pr.reattemptPrId) : undefined
   /* a failed request: what the Reason Master → Reason Policy decides for its reason (growOrders/reasonPolicy) */
   const policyLine = pr.status === 'Pickup Failed' && pr.failureReason && pr.failureReason !== NO_ORDERS_REASON
     ? PICKUP_OUTCOME_LABEL[pickupOutcomeFor(pr.failureReason, pr.attempt, pr.maxAttempts)] : null
@@ -342,112 +321,42 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
     ) },
     { id: 'outcome', label: 'Pickup outcome', icon: PackageCheck, node: (
       <Panel title="Pickup outcome">
-        <p className="flex items-start gap-1.5 px-5 pb-1 pt-1 text-[12px] text-ink-3">
-          <Info size={13} className="mt-[1px] shrink-0" />
-          A shipment booked on one pickup request and picked up on another shows on both.
-        </p>
-
-        <OutcomeSection title="Booked" count={booked.length}
-          action={on && gate('addConsignments').enabled
-            ? <Button size="sm" variant="outline" icon={<Plus size={13} />} onClick={() => setDialog('add')}>Add shipments</Button>
-            : undefined}
-          empty={pr.blind ? 'Reserved — no shipments attached yet. Attach them with Add shipments.' : 'None'}>
-          {outcomeTable(booked)}
-        </OutcomeSection>
-
-        <OutcomeSection title="Picked" count={pickedRows.length}>
-          {outcomeTable(pickedRows)}
-        </OutcomeSection>
-
-        <OutcomeSection title="Not picked" count={notPickedRows.length}
-          empty={attempted ? 'None' : 'Nothing yet — known once the driver has attempted the pickup.'}>
-          {outcomeTable(notPickedRows)}
-        </OutcomeSection>
-
-        <OutcomeSection title="Overage scans" count={pr.overages.length}>
-          <SimpleTable<GrowPickupRequest['overages'][number]> rows={pr.overages} rowKey={(v) => v.id}
-            columns={[
-              { label: 'Barcode', render: (v) => <span className="font-mono text-[12px] font-bold text-ink">{v.barcode}</span> },
-              { label: 'Scanned at', render: (v) => fmtStamp(v.scannedAt) },
-              { label: 'Weight', align: 'right', render: (v) => (v.weightKg != null ? `${v.weightKg.toFixed(1)} kg` : '—') },
-              { label: 'Note', render: (v) => v.note || '—' },
-              { label: 'Status', render: (v) => (v.orderId
-                ? <StatusPill label={`Resolved · ${byId.get(v.orderId)?.orderNumber ?? v.orderId}`} tone="success" />
-                : <StatusPill label="Unresolved" tone="warning" />) },
-            ]} />
-          <p className="px-5 pb-1 pt-2 text-[12px] text-ink-3">
-            A barcode that matched no shipment. The merchant resolves it with Create order on their portal; a parcel that reached the hub is resolved from Inbound.
+        {/* one line of counts, Add shipments on the right */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-5 pb-3 pt-1 text-[14px] text-ink-2">
+          <span><b className="text-ink">{booked.length}</b> consignment{booked.length === 1 ? '' : 's'} booked</span>
+          <span><b className="text-ink">{packageCount}</b> package{packageCount === 1 ? '' : 's'}</span>
+          <span><b className="text-ink">{pickedRows.length}</b> picked</span>
+          {attempted && <span><b className="text-ink">{notPickedRows.length}</b> not picked</span>}
+          {pr.overages.length > 0 && <span><b className="text-ink">{pr.overages.length}</b> overage</span>}
+          {on && gate('addConsignments').enabled && (
+            <span className="ml-auto"><Button size="sm" variant="outline" icon={<Plus size={13} />} onClick={() => setDialog('add')}>Add shipments</Button></span>
+          )}
+        </div>
+        {outcomeRows.length || pr.overages.length ? (<>
+          {/* the package table is wide — it scrolls sideways inside its card, never the whole panel */}
+          {pkgRows.length > 0 && <div className="max-w-full overflow-x-auto">{outcomeTable(pkgRows)}</div>}
+          {pr.overages.length > 0 && (<div className="max-w-full overflow-x-auto">
+            <SimpleTable<GrowPickupRequest['overages'][number]> rows={pr.overages} rowKey={(v) => v.id}
+              columns={[
+                { label: 'Overage scan', render: (v) => <span className="font-mono text-[12px] font-bold text-ink">{v.barcode}</span> },
+                { label: 'Scanned at', render: (v) => fmtStamp(v.scannedAt) },
+                { label: 'Weight', align: 'right', render: (v) => (v.weightKg != null ? `${v.weightKg.toFixed(1)} kg` : '—') },
+                { label: 'Status', render: (v) => (v.orderId
+                  ? <StatusPill label={`Overage · ${byId.get(v.orderId)?.orderNumber ?? v.orderId}`} tone="success" />
+                  : <StatusPill label="Overage · no shipment yet" tone="danger" />) },
+                { label: 'Note', render: (v) => v.note || '—' },
+              ]} /></div>
+          )}
+        </>) : (
+          <p className="px-5 pb-4 text-[14px] text-ink-3">
+            {pr.blind ? 'Reserved — no consignments attached yet. Attach them with Add shipments.' : 'No consignments on this request.'}
           </p>
-        </OutcomeSection>
+        )}
         <div className="h-3" />
       </Panel>
     ) },
-    { id: 'handover', label: 'Handover', icon: ScanBarcode, node: (
-      <Panel title="Handover">
-        <div className="flex flex-wrap items-center gap-2 px-5 pb-3 pt-1 text-[13px] text-ink-2">
-          <span>Mode: <span className="font-bold text-ink">{modeText}</span></span>
-          <span className="text-ink-3">·</span>
-          <span>{pr.handover.closedAt
-            ? <>Closed {fmtStamp(pr.handover.closedAt)}</>
-            : pr.handover.arrivedAtHubAt ? <>At hub since {fmtStamp(pr.handover.arrivedAtHubAt)}</>
-            : pr.status === 'Completed' ? 'In transit to hub' : 'Not collected yet'}</span>
-          {pr.handover.manifestRef && <><span className="text-ink-3">·</span><span>Manifest <span className="font-mono">{pr.handover.manifestRef}</span></span></>}
-          {pr.carrierPickupRef && <><span className="text-ink-3">·</span><span>Carrier ref <span className="font-mono">{pr.carrierPickupRef}</span></span></>}
-          {on && gate('closeHandover').enabled && (
-            <span className="ml-auto"><Button size="sm" onClick={() => setDialog('close')}>Close handover</Button></span>
-          )}
-        </div>
-        {universe.length === 0 ? (
-          <p className="px-5 pb-5 text-[13px] text-ink-3">Nothing to reconcile yet — scans appear here once the driver collects.</p>
-        ) : (
-          <div className="grid grid-cols-4 gap-3 px-5 pb-5">
-            {buckets.map((b) => (
-              <div key={b.key} className="rounded-md border border-line p-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-bold text-ink">{b.label}</span>
-                  <StatusPill label={String(b.ids.length)} tone={b.ids.length ? b.tone : 'neutral'} />
-                </div>
-                <p className="mt-0.5 text-[12px] text-ink-3">{b.hint}</p>
-                <div className="mt-2 flex flex-col gap-0.5">
-                  {b.ids.map((i) => <span key={i} className="font-mono text-[12px] text-ink-2">{byId.get(i)?.orderNumber ?? i}</span>)}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Panel>
-    ) },
-    { id: 'trip', label: 'Trip', icon: Truck, node: (
-      <Panel title="Trip">
-        {trip ? (
-          <Pairs pairs={[
-            ['Trip', <Link to={`/local/control-tower/trips/${trip.id}`} className="font-mono font-bold text-brand-500 hover:text-brand-600">{trip.id}</Link>],
-            ['Status', trip.status],
-            ['Date', trip.date],
-            ['Driver', pr.driverName ?? trip.driverName ?? 'Not assigned'],
-            ['Vehicle', trip.vehicle ?? ''],
-            ['Stop', stop ? `#${stop.seq} · ${stop.status} · ETA ${stop.eta}` : ''],
-          ]} />
-        ) : (
-          <div className="px-5 pb-5 pt-1 text-[13px] text-ink-3">
-            {pr.carrierMode === 'CARRIER'
-              ? `Run by ${pr.carrierName} (3PL) — no fleet trip.`
-              : pr.tripId ? `Trip ${pr.tripId} is not in this browser's planning data.` : 'Not on a route yet.'}
-            {on && can.addToRoute(pr) && !pr.tripId && (
-              <div className="mt-3"><Button size="sm" variant="outline" onClick={() => setDialog('route')}>Add to route</Button></div>
-            )}
-          </div>
-        )}
-      </Panel>
-    ) },
-    ...(parent || retry ? [{ id: 'related', label: 'Related', icon: Link2, node: (
-        <Panel title="Related">
-          <div className="flex flex-col gap-2 px-5 pb-5 pt-1 text-[13px]">
-            {parent && <span>Re-attempt of <Link to={`/local/pickup/${parent.id}`} className="font-mono font-bold text-brand-500">{parent.number}</Link> <span className="text-ink-3">· {statusLabel(parent).label}</span></span>}
-            {retry && <span>Re-attempted as <Link to={`/local/pickup/${retry.id}`} className="font-mono font-bold text-brand-500">{retry.number}</Link> <span className="text-ink-3">· {statusLabel(retry).label}</span></span>}
-          </div>
-        </Panel>
-    ) }] : []),
+    /* owner, 2026-10-23: no Trip and no Related sections — the trip shows as the "On route T…" tag beside the state, a
+       re-attempt chain in the Exception column and the Timeline */
     { id: 'timeline', label: 'Timeline', icon: History, node: (
       <Panel title="Timeline">
         <ol className="flex flex-col px-5 pb-5 pt-1">
@@ -471,6 +380,10 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
         {referenceChips(pr).map((c) => <StatusPill key={c} label={c} tone={c.endsWith(' blind') ? 'info' : 'neutral'} />)}
         <StatusPill label={s.label} tone={s.tone} />
         {tags.map((t) => <StatusPill key={t.label} label={t.label} tone={t.tone} />)}
+        {/* a draft's one next step, in plain sight (owner, 2026-10-22) */}
+        {on && isDraftPr(pr.status) && (() => { const g = gate('raise'); return (
+          <span title={g.enabled ? undefined : g.reason}><Button size="sm" icon={<Send size={13} />} disabled={!g.enabled} onClick={raise}>Raise pickup request</Button></span>
+        ) })()}
         {items.length > 0 && <KebabMenu items={items} />}
       </>}>
       <SlideOverSections sections={sections} label="Pickup request sections" />
@@ -481,7 +394,8 @@ function Detail({ pr, back }: { pr: GrowPickupRequest; back: () => void }) {
       {dialog === 'manual' && <ManualPickupDialog pr={pr} onClose={close} onDone={close} />}
       {dialog === 'route' && <AddToRouteDialog prIds={[pr.id]} onClose={close} onDone={close} />}
       {dialog === 'carrier' && <AssignCarrierDialog prs={[pr]} onClose={close} onDone={close} />}
-      {dialog === 'close' && <CloseHandoverDialog pr={pr} reconciled={reconciled} onClose={close} onDone={close} />}
+      {/* the Handover section is gone (owner, 2026-10-22); Close handover stays in the ⋮ menu */}
+      {dialog === 'close' && <CloseHandoverDialog pr={pr} reconciled={handoverReconciled(pr)} onClose={close} onDone={close} />}
     </SlideOver>
   )
 }

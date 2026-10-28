@@ -12,18 +12,38 @@ export type PaymentMode = 'Prepaid' | 'COD'
 /** Has the merchant paid for the shipment yet? Unpaid orders live on the Drafts tab. */
 export type PaymentStatus = 'Unpaid' | 'Paid'
 /**
- * The eight pickup-request states the Pickup Requests page shows. The first six
- * form the happy path (`PR_FLOW` in tabs.ts); the last two are terminal side
- * exits.
+ * The seven pickup-request states — FarEye's official names (owner, 2026-10-22).
+ * `PR_FLOW` in tabs.ts is the happy path; `Pickup Failed` / `Cancelled` are side exits.
  *
- * `Requested` is the ENTRY state: the portal's own flow opened with a `Created`
- * step that said nothing a merchant could act on differently — a booking that
- * exists has been requested — so the two were merged. A persisted `'Created'`
- * is migrated to `'Requested'` by `normalizePr`.
+ * Created → Pickup Requested → Driver Assigned For Pickup → Out For Pickup → Pickedup.
+ * Dropped: Planned and Ready For Last Mile Dispatch — being on a route is the trip tag
+ * on a Pickup Requested request. Renamed: Assigned → Driver Assigned For Pickup (a
+ * driver or a 3PL carrier holds it), Completed → Pickedup (Partially Pickedup is the
+ * outcome reading).
+ *  - `Created` is a DRAFT: saved, not raised. Its consignments are not yet
+ *    Pickup Requested, it is never planned, routed or flagged, and it only allows
+ *    edits, Raise and Cancel (prActions).
+ *  - `Pickup Requested` is a RAISED request (formerly `Requested`) — the entry
+ *    state of every automatic, scheduled or "Create pickup request" booking.
+ *  - `Out For Pickup` (OFP) — the driver is on the way.
+ * `normalizePr` migrates stored names: Requested / Planned / Ready For Last Mile
+ * Dispatch → Pickup Requested, Assigned → Driver Assigned For Pickup, Completed → Pickedup.
+ * (Until v17 a stored `'Created'` meant a raised request; the v18 key bump
+ * reseeds, so a stored `'Created'` now always is a draft.)
  */
+/**
+ * How far a request may have got for a change to be allowed (settings "until …"). Not states: `On a route`
+ * is a Pickup Requested request with a trip (owner, 2026-10-22 — Planned is no longer a state).
+ */
+export type PrCutoff = 'Pickup Requested' | 'On a route' | 'Driver Assigned For Pickup'
+export const PR_CUTOFFS: readonly PrCutoff[] = ['Pickup Requested', 'On a route', 'Driver Assigned For Pickup']
+/** a cut-off saved before 2026-10-22 ('Requested' / 'Planned' / 'Assigned') → today's name */
+export const toCutoff = (v: unknown): unknown =>
+  (v === 'Requested' ? 'Pickup Requested' : v === 'Planned' ? 'On a route' : v === 'Assigned' ? 'Driver Assigned For Pickup' : v)
+
 export type PickupRequestStatus =
-  | 'Requested' | 'Planned' | 'Ready For Last Mile Dispatch'
-  | 'Assigned' | 'Out For Pickup' | 'Completed' | 'Pickup Failed' | 'Cancelled'
+  | 'Created' | 'Pickup Requested' | 'Driver Assigned For Pickup' | 'Out For Pickup' | 'Pickedup'
+  | 'Pickup Failed' | 'Cancelled'
 
 /**
  * A barcode the driver scanned at the handover that matched NO order in the

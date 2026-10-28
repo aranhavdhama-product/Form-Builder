@@ -52,7 +52,7 @@ function columnOf(d: PrColumnDef, ctx: PrColumnCtx, cells: PrCells): Column {
  * The grid's columns + its ⚙ chooser, persisted under `storageKey`.
  * `defaults` = this page's default set; `hideEmptyOf` = hide columns no row has data for.
  */
-export function usePrGridColumns({ storageKey, defaults, ctx, cells = {}, hideEmptyOf, defs = PR_COLUMN_DEFS }: {
+export function usePrGridColumns({ storageKey, defaults, ctx, cells = {}, hideEmptyOf, defs = PR_COLUMN_DEFS, fixed = false }: {
   storageKey: string
   defaults: string[]
   ctx: PrColumnCtx
@@ -60,12 +60,15 @@ export function usePrGridColumns({ storageKey, defaults, ctx, cells = {}, hideEm
   hideEmptyOf?: GrowPickupRequest[]
   /** the column universe — default `PR_COLUMN_DEFS`; Grow passes its merchant subset (never in the ⚙ chooser otherwise) */
   defs?: PrColumnDef[]
+  /** `defs` IS the set, in order (the Pickup page's column configuration) — no per-browser picks, no chooser */
+  fixed?: boolean
 }): { columns: Column[]; chooser: ReactNode } {
   const [picked, setPicked] = useColumnPrefs(storageKey, defaults, defs === PR_COLUMN_DEFS ? PR_COLUMN_KEYS : defs.map((d) => d.key))
   const offered = hideEmptyOf
     ? defs.filter((d) => hideEmptyOf.some((p) => d.value(p, ctx)))
     : defs
-  const shown = offered.filter((d) => picked.includes(d.key))
+  const shown = fixed ? offered : offered.filter((d) => picked.includes(d.key))
+  if (fixed) return { columns: shown.map((d) => columnOf(d, ctx, cells)), chooser: null }
   return {
     columns: shown.map((d) => columnOf(d, ctx, cells)),
     chooser: (

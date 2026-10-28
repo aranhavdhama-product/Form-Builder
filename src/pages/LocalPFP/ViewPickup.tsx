@@ -32,8 +32,11 @@ import {
 import { EmptyState, StatusPill } from '../../nueva/components'
 import { useGrowOrders } from '../../growOrders/store'
 import { cancelReasonLabel, failureReasonLabel } from '../../growOrders/pickupReasons'
-import { toPickupRow } from './adapter'
-import { prTypeLabel } from '../LocalPickup/prModel'
+import { packageNumbersOf, palletSpacesOf, toPickupRow } from './adapter'
+import {
+  actualQty, categoriesOfPr, plannedQty, prTypeLabel, statusLabel,
+} from '../LocalPickup/prModel'
+import type { Pair } from './overlayBits'
 import { fmtDateTime, pickupSummary, prOrders, prOutcomeWords } from '../GrowOrders/utils'
 import { ArrowRight } from './icons'
 import { Section } from './overlayBits'
@@ -122,9 +125,31 @@ function ViewPickupBody({ basePath }: { basePath: string }) {
   const weight = row.weightKnown
     ? `${row.weightApprox ? '~ ' : ''}${row.weightKg.toFixed(1)} KG`
     : '—'
-  const qty = row.qtyKnown
-    ? `${row.qtyApprox ? '~ ' : ''}${row.qty} ${row.qtyUnit}${row.qty === 1 ? '' : 's'}`
-    : '—'
+  /* owner, 2026-10-22: the details are at the PICKUP level — its consignments and their packages, when it was made and last changed */
+  const status = statusLabel(pr)
+  const consignmentNos = booked.map((o) => o.orderNumber)
+  const packageNos = booked.flatMap(packageNumbersOf)
+  const updatedAt = pr.statusHistory.reduce((t, e) => (e.at > t ? e.at : t), pr.createdAt)
+  const planned = plannedQty(pr, byId), actual = actualQty(pr, byId)
+  const pallets = booked.reduce((n, o) => n + palletSpacesOf(o), 0)
+  const services = [...new Set(booked.map((o) => o.serviceType).filter(Boolean))]
+  const categories = categoriesOfPr(pr, byId)
+  /* a list of numbers: chips, the first 12, then "+n more" opens the Orders tab */
+  const numbers = (xs: string[]) => (xs.length ? (
+    <span className="pfp-numchips">
+      {xs.slice(0, 12).map((x) => <span key={x} className="pfp-numchip">{x}</span>)}
+      {xs.length > 12 && <button type="button" className="pfp-numchip" data-more onClick={() => setTab(1)}>+{xs.length - 12} more</button>}
+    </span>
+  ) : '—')
+  /* optional rows show only when they say something */
+  const keep = (pairs: (Pair | false | null | undefined | '' | 0)[]): Pair[] => pairs.filter((x): x is Pair => !!x)
+  const loadPairs = keep([
+    row.sizeClass && ['Size Class', row.sizeClass],
+    row.vehicleType && ['Vehicle Type', row.vehicleType],
+    row.vehicleUnit != null && ['Number of Vehicles', String(row.vehicleUnit)],
+    pr.expectedPieces != null && ['Expected Pieces', String(pr.expectedPieces)],
+    pr.expectedWeightKg != null && ['Expected Weight', `${pr.expectedWeightKg} KG`],
+  ])
 
   return (
     <>
@@ -135,8 +160,7 @@ function ViewPickupBody({ basePath }: { basePath: string }) {
             <ArrowLeft size={16} />
           </button>
           <span className="pfp-overlay-title">{row.reference}</span>
-          <span className="pfp-pill">{row.state}</span>
-          <span className="pfp-kindtag" data-tone="pickup">Pickup request</span>
+          <StatusPill label={status.label} tone={status.tone} />
           {row.overdue && <span className="pfp-kindtag" data-tone="danger">Overdue</span>}
           {/* from the Pickup page the full request page (actions, handover) is one click away */}
           {basePath === '/local/pickup' && (
@@ -179,32 +203,41 @@ function ViewPickupBody({ basePath }: { basePath: string }) {
                       are the merchant&rsquo;s estimate, not a sum over real orders.
                     </p>
                   )}
-                  <Section title="Summary" pairs={[
+                  {/* the numbers a planner reads first */}
+                  <div className="pfp-kpis">
+                    <div><span>Planned Quantity</span><b>{reserved && !booked.length ? `~ ${planned}` : planned}</b></div>
+                    <div><span>Actual Quantity</span><b>{actual ?? '—'}</b></div>
+                    <button type="button" onClick={() => setTab(1)} disabled={!pr.overages.length}
+                      title={pr.overages.length ? 'View the overage scans' : 'No overage scans'}>
+                      <span>Shipment Overage</span><b>{pr.overages.length || '—'}</b>
+                    </button>
+                    <div><span>Weight</span><b>{weight}</b></div>
+                    <div><span>Pallet Spaces</span><b>{pallets || '—'}</b></div>
+                  </div>
+                  <Section title="Details" pairs={[
                     ['Request Number', row.reference],
+                    ['Status', <StatusPill key="s" label={status.label} tone={status.tone} />],
                     ['Type', prTypeLabel(pr)],
-                    ['Status', <StatusPill key="s" label={row.state} tone="info" />],
-                    ['Secondary Status', dash(row.secondaryState)],
                     ['Merchant', row.merchant],
-                    ['Shipment Type', pr.shipmentType],
-                    ['Overdue', row.overdue ? 'Yes' : 'No'],
-                    ['Created At', stamp(row.createdAt)],
+                    ['Service Type', services.join(', ') || '—'],
+                    ['Shipment Category', categories.join(', ') || '—'],
+                    ['Created At', stamp(pr.createdAt)],
+                    ['Updated At', stamp(updatedAt)],
+                    [`Consignment Number${consignmentNos.length === 1 ? '' : 's'} (${consignmentNos.length})`, numbers(consignmentNos), { wide: true }],
+                    [`Package Number${packageNos.length === 1 ? '' : 's'} (${packageNos.length})`, numbers(packageNos), { wide: true }],
                   ]} />
-                  <Section title="Collection" pairs={[
+                  <Section title="Collection" pairs={keep([
                     ['Pickup Point', row.shipFromName],
-                    ['Address', row.shipFromAddress],
-                    ['Window Start', stamp(row.pickupWindow.start)],
-                    ['Window End', stamp(row.pickupWindow.end)],
-                    ['Same Day', row.sameDayWindow ? 'Yes' : 'No — crosses midnight'],
-                    ['Driver Instructions', dash(row.instructions)],
-                    ['Contact Name', dash(pr.contactName)],
-                    ['Contact Number', dash(pr.contactNumber)],
-                  ]} />
-                  <Section title="Execution" pairs={[
-                    ['Attempt', `${pr.attempt} / ${pr.maxAttempts}`],
-                    ['Driver', dash(pr.driverName)],
+                    ['Pickup Window', `${stamp(row.pickupWindow.start)} – ${row.sameDayWindow ? stamp(row.pickupWindow.end).replace(/^.*?, \d{4}, /, '') : stamp(row.pickupWindow.end)}`],
+                    ['Address', row.shipFromAddress, { wide: true }],
+                    (pr.contactName || pr.contactNumber) && ['Contact', [pr.contactName, pr.contactNumber].filter(Boolean).join(' · ')],
+                    row.instructions && ['Driver Instructions', row.instructions],
+                  ])} />
+                  <Section title="Execution" pairs={keep([
                     ['Carrier', pr.carrierName
                       ? `${pr.carrierName}${pr.carrierMode ? ` (${pr.carrierMode === 'CARRIER' ? '3PL' : 'Fleet'})` : ''}`
                       : '—'],
+                    ['Assigned To Driver', dash(pr.driverName)],
                     ['Trip', pr.tripId
                       ? (
                         <button key="trip" type="button" className="pfp-order"
@@ -212,28 +245,20 @@ function ViewPickupBody({ basePath }: { basePath: string }) {
                           {pr.tripId}
                         </button>
                       )
-                      : 'Not routed'],
-                    ['Failure Reason', dash(failureReasonLabel(pr.failureReason))],
-                    ['Cancel Reason', dash(cancelReasonLabel(pr.cancelReason))],
+                      : 'Not on a route'],
+                    ['Attempt', `${pr.attempt} / ${pr.maxAttempts}`],
                     ['Handover', `${HANDOVER_MODE[pr.handover.mode]} · driver ${pr.handover.driverScanned.length}`
                       + ` · hub ${pr.handover.hubScanned.length}${pr.handover.closedAt ? ' · closed' : ''}`],
-                    ['Manifest Ref', dash(pr.handover.manifestRef)],
-                  ]} />
-                  <Section title={ftl ? 'Ship To' : 'Destination'} pairs={[
+                    pr.handover.manifestRef && ['Manifest Ref', pr.handover.manifestRef],
+                    pr.failureReason && ['Failure Reason', failureReasonLabel(pr.failureReason)],
+                    pr.cancelReason && ['Cancel Reason', cancelReasonLabel(pr.cancelReason)],
+                  ])} />
+                  <Section title={ftl ? 'Ship To' : 'Destination'} pairs={keep([
                     [ftl ? 'Consignee' : 'Inbound Hub', row.shipToName],
-                    ['Address', dash(row.shipToAddress)],
-                    ['Facility Code', dash(pr.destinationCode)],
-                  ]} />
-                  <Section title="Load" pairs={[
-                    ['Weight', weight],
-                    [ftl ? 'Units' : 'Pieces', qty],
-                    ['Orders Booked', String(pr.orderIds.length)],
-                    ['Size Class', dash(row.sizeClass)],
-                    ['Vehicle Type', dash(row.vehicleType)],
-                    ['Number of Vehicles', row.vehicleUnit != null ? String(row.vehicleUnit) : '—'],
-                    ['Expected Pieces', pr.expectedPieces != null ? String(pr.expectedPieces) : '—'],
-                    ['Expected Weight', pr.expectedWeightKg != null ? `${pr.expectedWeightKg} KG` : '—'],
-                  ]} />
+                    pr.destinationCode && ['Facility Code', pr.destinationCode],
+                    row.shipToAddress && ['Address', row.shipToAddress, { wide: true }],
+                  ])} />
+                  {loadPairs.length > 0 && <Section title="Load" pairs={loadPairs} />}
                 </>
               )}
 

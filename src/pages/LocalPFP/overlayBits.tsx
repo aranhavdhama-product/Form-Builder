@@ -10,13 +10,14 @@
 import type { ReactNode } from 'react'
 import { Panel } from '../../nueva/components'
 
-export type Pair = [string, ReactNode]
+/** label · value · `wide` = the value takes the whole row (a list of numbers) */
+export type Pair = [string, ReactNode] | [string, ReactNode, { wide: boolean }]
 
 export function Grid({ pairs }: { pairs: Pair[] }) {
   return (
     <div className="grid grid-cols-1 gap-x-8 gap-y-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
-      {pairs.map(([k, v]) => (
-        <div key={k} className="min-w-0">
+      {pairs.map(([k, v, o]) => (
+        <div key={k} className={`min-w-0${o?.wide ? ' sm:col-span-2 lg:col-span-4' : ''}`}>
           <p className="text-[12px] text-ink-3">{k}</p>
           <p className="mt-0.5 text-[13px] font-bold text-ink break-words">{v}</p>
         </div>

@@ -9,6 +9,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import { AUTO_PICKUP_TRIGGER_CODES, DEFAULT_AUTO_PICKUP_TRIGGER, EVENT_AFTER_STATE, LEGACY_AFTER_STATE_EVENT } from '../growOrders/fareyeEvents'
+import { PR_CUTOFFS, toCutoff, type PrCutoff } from '../growOrders/types'
 
 export interface PickupModuleConfig {
   enabled: boolean                       // default true
@@ -31,7 +32,7 @@ export interface PickupModuleConfig {
    */
   manifestRequired: boolean              // default true
   maxAttempts: number                    // default 3
-  allowAddToExistingUntil: 'Requested' | 'Planned' | 'Assigned'   // default 'Planned'
+  allowAddToExistingUntil: PrCutoff   // default 'On a route'
   rescheduleWindowDays: number           // default 7
   overagePolicy: 'hold' | 'auto-create' | 'reject'   // default 'hold'
   sendToCarrier: boolean                 // default false
@@ -67,7 +68,7 @@ export interface PickupModuleConfig {
     photo: PodLevel                      // default 'optional'
     otp: boolean                         // default false
   }
-  merchantCancelUntil: 'Requested' | 'Planned' | 'Assigned'   // default 'Planned'
+  merchantCancelUntil: PrCutoff   // default 'On a route'
   autoRescheduleOnFail: boolean          // default true
   /** per-merchant overrides, keyed by merchant code — see configForMerchant() */
   merchantOverrides: Record<string, MerchantOverride>   // default {}
@@ -144,7 +145,7 @@ export const DEFAULT_PICKUP_MODULE_CONFIG: PickupModuleConfig = Object.freeze({
   scanMode: 'both',
   manifestRequired: true,
   maxAttempts: 3,
-  allowAddToExistingUntil: 'Planned',
+  allowAddToExistingUntil: 'On a route',
   rescheduleWindowDays: 7,
   overagePolicy: 'hold',
   sendToCarrier: false,
@@ -156,7 +157,7 @@ export const DEFAULT_PICKUP_MODULE_CONFIG: PickupModuleConfig = Object.freeze({
   pickupDaysSource: 'merchant-then-hub',
   slotDefinitions: Object.freeze(['09:00-12:00', '12:00-15:00', '15:00-18:00']) as unknown as string[],
   podRequirements: Object.freeze({ signature: 'optional', photo: 'optional', otp: false }) as PickupModuleConfig['podRequirements'],
-  merchantCancelUntil: 'Planned',
+  merchantCancelUntil: 'On a route',
   autoRescheduleOnFail: true,
   merchantOverrides: Object.freeze({}) as Record<string, MerchantOverride>,
 }) as PickupModuleConfig
@@ -176,7 +177,9 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
 const SLOT = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/
 const MULTI_PR = ['ONE_OPEN_PER_LOCATION', 'ONE_PER_SLOT', 'UNLIMITED'] as const
 const POD = ['required', 'optional', 'off'] as const
-const STAGES = ['Requested', 'Planned', 'Assigned'] as const
+const STAGES = PR_CUTOFFS
+/** a setting saved before 2026-10-22 ('Requested' / 'Planned' / 'Assigned') → today's cut-off */
+const legacyStage = toCutoff
 
 function time(v: unknown, fallback: string): string {
   return typeof v === 'string' && HHMM.test(v) ? v : fallback
@@ -254,7 +257,7 @@ function normalize(raw: unknown): PickupModuleConfig {
     scanMode: oneOf(o.scanMode, ['driver', 'hub', 'both'] as const, d.scanMode),
     manifestRequired: typeof o.manifestRequired === 'boolean' ? o.manifestRequired : d.manifestRequired,
     maxAttempts: int(o.maxAttempts, d.maxAttempts, 1, 5),
-    allowAddToExistingUntil: oneOf(o.allowAddToExistingUntil, STAGES, d.allowAddToExistingUntil),
+    allowAddToExistingUntil: oneOf(legacyStage(o.allowAddToExistingUntil), STAGES, d.allowAddToExistingUntil),
     rescheduleWindowDays: int(o.rescheduleWindowDays, d.rescheduleWindowDays, 0, 365),
     overagePolicy: oneOf(o.overagePolicy, ['hold', 'auto-create', 'reject'] as const, d.overagePolicy),
     sendToCarrier: typeof o.sendToCarrier === 'boolean' ? o.sendToCarrier : d.sendToCarrier,
@@ -270,7 +273,7 @@ function normalize(raw: unknown): PickupModuleConfig {
       photo: oneOf(pod.photo, POD, d.podRequirements.photo),
       otp: typeof pod.otp === 'boolean' ? pod.otp : d.podRequirements.otp,
     },
-    merchantCancelUntil: oneOf(o.merchantCancelUntil, STAGES, d.merchantCancelUntil),
+    merchantCancelUntil: oneOf(legacyStage(o.merchantCancelUntil), STAGES, d.merchantCancelUntil),
     autoRescheduleOnFail: typeof o.autoRescheduleOnFail === 'boolean' ? o.autoRescheduleOnFail : d.autoRescheduleOnFail,
     merchantOverrides: overrides(o.merchantOverrides),
   }

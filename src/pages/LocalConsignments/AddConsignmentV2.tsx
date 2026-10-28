@@ -37,7 +37,8 @@ import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleMinus, Info, Lock, MapPinned, Package, Pencil, Plus, RotateCcw,
-  ArrowDown, ArrowUp, Asterisk, Barcode, Bookmark, Copy, Eye, EyeOff, GripVertical, ListChecks, ListCollapse, Regex, ScanBarcode, SlidersHorizontal, Trash2, Truck, X, Crown, Flame, GlassWater, Layers, Users, Weight, Monitor, Store,
+  ArrowDown, ArrowUp, Asterisk, Barcode, Bookmark, Copy, Eye, EyeOff, GripVertical, ListChecks, ListCollapse, Regex, ScanBarcode, SlidersHorizontal, Trash2, Truck, X, ListPlus, Crown, Flame, GlassWater, Layers, Users, Weight, Monitor, Store, Route as RouteIcon, LayoutTemplate,
+  ArrowLeftRight, ArrowRight, Banknote, Bike, Boxes, CalendarCheck, Clock, House, MapPin, Repeat, ShieldCheck, Sparkles, Split, Undo2, Warehouse, Wrench, Zap,
 } from 'lucide-react'
 import { blankParty, CURRENCY } from '../../growOrders/seed'
 import { growOrderActions, orderById, pickupRequestById, useGrowOrders } from '../../growOrders/store'
@@ -48,30 +49,33 @@ import {
   vehicleTypeOf, vehicleTypesFor, loadMasters, type PackageType, type SkuItem,
 } from '../../growOrders/masters'
 import { toast } from '../../nueva/toast'
+import { placeGrowOrder, taxOf } from '../GrowOrders/placeOrder'
+import { useSplitPayment, paidNowOf } from '../GrowOrders/splitPayment'
+import { SplitPaymentSheet } from '../GrowOrders/paymentSheet'
 import {
-  Button, DateInput, Input, MenuSelect, Modal, MultiSelectDropdown, Toggle, SearchInput, Tooltip, WizardSteps,
+  Button, Checkbox, DateInput, Input, MenuSelect, Modal, MultiSelectDropdown, Toggle, SearchInput, Tooltip,
 } from '../../nueva/components'
 import {
   AddMoreButton, PhoneInput, SwitchBox, SwitchField, TimeBox, UnitBox,
 } from '../../components/consignmentForm'
-import { money, ORDER_STEPS, OTHER_ADDRESS, partyOk, prWindow, storeOptionLabel } from '../GrowOrders/utils'
+import { money, OTHER_ADDRESS, partyOk, prWindow, storeOptionLabel } from '../GrowOrders/utils'
 import { hubName, inboundHubFor, INBOUND_HUBS } from '../../growOrders/hubs'
 import { usePickupLocations, useReceiverBook } from '../GrowOrders/pickupLocations'
 import {
-  hasPickupLeg, legsOf, legsOfMovement, movementOfLegs, MOVEMENT_TYPES, type LegChoice, type LegKind, type MovementType, type RouteEnd,
+  hasPickupLeg, legsOf, legsOfMovement, movementOfLegs, MOVEMENT_LABEL, MOVEMENT_TYPES, type LegChoice, type LegKind, type MovementType, type RouteEnd,
 } from './shipmentLegs'
 import {
   ADDITIONAL_SERVICES, DEFAULT_FTL_SERVICE, DRAFT_KEY, FTL_SERVICE_CODES, FTL_SERVICE_TYPES, PARCEL_SERVICES, SERVICE_TYPES, VEHICLE_SPECS,
-  clearDraftKeys, draftFromOrder, loadTypeOf, ftlQuoteVehicles, ftlServiceType, readOverageSidecar, setCheckoutSidecar, setDraftSidecar,
+  clearDraftKeys, draftFromOrder, loadTypeOf, ftlQuoteVehicles, ftlServiceType, readOverageSidecar,
   totalLoadKg, vehiclesFor,
   vehiclesOf, type ConsignmentFields, type CustomFieldValue, type FtlVehicle, type OrderDraft, type Parcel, type ParcelItem, type UnitSystem, type VasLine, type WeightUnit, type DimUnit,
 } from '../../growOrders/draft'
 import {
   CUSTOM_FIELD_CARDS, CUSTOM_FIELD_KINDS, DEFAULT_LAYOUT, FIELD_WIDTHS, FORMAT_PRESETS, PKG_SECTION, SKU_SECTION, applyOrder, clearLegacyGoods, formatError, formatMessage, formatSummary,
-  growRules, isCustomKey, loadCustomFields, loadLayout, loadOrder, loadRules, loadSummary, moveId, newCustomKey, patternError,
+  GROW_OWN_KEYS, SECTION_ZONE, growRules, isCustomKey, loadCustomFields, loadLayout, loadOrder, loadRules, loadSummary, moveId, newCustomKey, patternError,
   saveCustomFields, saveLayout, saveOrder, saveRules, saveSummary, withoutKeys, DEFAULT_SUMMARY,
   type CustomFieldCard, type CustomFieldDef, type CustomFieldKind, type FieldFormat, type FieldRuleV2, type FieldWidth, type FormatPreset, type FormLayout,
-  type FormRulesV2, type FormOrder, type FormSummary, type AddressArrangement, type AddressEntry, FORM_TIER_KEY,
+  type FormPortal, type FormRulesV2, type FormOrder, type FormSummary, type AddressArrangement, type AddressEntry,
 } from './formSetup'
 import { usePickupModuleConfig } from '../../config/pickupModule'
 import { hubVehicleTypes } from '../../config/vehicleConfig'
@@ -83,7 +87,7 @@ import {
 import { SlotWindowFields } from '../LocalPickup/slotFields'
 import { packageReady } from '../GrowOrders/packageModel'
 import { windowOk as slotWindowOk } from '../GrowOrders/utils'
-import { ServiceTypeChooser, type BookingMode, type FleetVehicle } from '../GrowOrders/serviceCards'
+import { ServiceChoice, ServiceTypeChooser, type BookingMode, type FleetVehicle } from '../GrowOrders/serviceCards'
 /* the console's field registry — pure module, read-only here */
 import { CONSIGNMENT_FIELDS, fieldLabel, loadFieldConfig, loadFormBehavior, type FieldDef } from '../ConsignmentAdd/fieldConfig'
 
@@ -156,12 +160,6 @@ const sepSort = <T,>(rows: T[], itOf: (r: T) => ParcelItem): T[] => rows.map((r,
   .sort((a, b) => a.no - b.no || a.idx - b.idx).map((x) => x.r)
 /** packages listed before "Show all" (owner, 2026-10-05: "if I have 100 packages this form is too much scroll") */
 const PKG_PAGE = 8
-/** the package row's field widths (flex: grow shrink basis) — Quantity and Weight fixed and narrow (owner, 2026-10-06) */
-const PKG_CELL: Record<string, string> = {
-  /* a field that wraps alone onto the next line grows only so far (max-w) — never one box across the card */
-  type: 'flex-[1.2_1_160px] max-w-[300px]', qty: 'flex-[0_0_88px]', dims: 'flex-[1.3_1_200px] max-w-[320px]', weight: 'flex-[0_0_112px]',
-  other: 'flex-[1_1_140px] max-w-[280px]',
-}
 const newVas = (): VasLine => ({ level: 'SKU', skuCode: '', service: '', serviceTimeMin: 0, remark: '' })
 /* owner, 2026-09-29: a service is added to a PACKAGE or a SKU (a full-vehicle booking: the whole booking) */
 const vasOk = (v: VasLine) => !!v.level && !!v.service && (v.level !== 'SKU' || !!v.skuCode) && (v.level !== 'PACKAGE' || !!v.packageId)
@@ -404,6 +402,10 @@ function F({ label, required, className = '', type, value, options, onChange, pl
   const ruleReq = useRuleRequired(fieldKey)
   /* a Format rule (builder): its message shows once the field is left, not only after an Add Order attempt */
   const fmtErr = useFormatError(fieldKey, value)
+  /* the builder's character limit (owner, 2026-10-27): typing stops there, and the field counts */
+  const limit = useContext(BuilderCtx)?.maxLen(fieldKey ?? '')
+  const typed = (v: string) => onChange(limit ? v.slice(0, limit) : v)
+  if (limit && !options && type !== 'date' && !helper) helper = `${(value ?? '').length}/${limit}`
   const [left, setLeft] = useState(false)
   const err = error || (ruleReq && !filled(value) ? 'Required field.' : undefined) || fmtErr || undefined
   const optLabel = (v: string) => options?.find((o) => o.value === v)?.label ?? v
@@ -417,9 +419,9 @@ function F({ label, required, className = '', type, value, options, onChange, pl
   } else if (type === 'date') {
     control = disabled ? <ReadBox value={value} /> : <DateInput value={value} onChange={onChange} />
   } else if (multiline) {
-    control = <textarea rows={rows} value={value} placeholder={ph} disabled={disabled} onChange={(e) => onChange(e.target.value)} className={TEXTAREA} />
+    control = <textarea rows={rows} value={value} placeholder={ph} disabled={disabled} onChange={(e) => typed(e.target.value)} className={TEXTAREA} />
   } else {
-    control = <Input type={type} value={value} placeholder={ph} disabled={disabled} onChange={onChange} />
+    control = <Input type={type} value={value} placeholder={ph} disabled={disabled} onChange={typed} />
   }
   return (
     <SFld label={label} required={required || ruleReq} error={err} errorNow={!!fmtErr && left && err === fmtErr} helper={helper} className={className} fieldKey={fieldKey}>
@@ -621,13 +623,14 @@ function SFld({ label, required, info, error, errorNow, helper, className = '', 
   const span = fieldKey && b ? widthSpan(b.width(fieldKey), cols) : ''
   return (
     <div data-field={pickable ? fieldKey : undefined}
-      className={`relative min-w-0 ${className} ${span} ${pickable ? `group/field ${pickFrame(b!.selected === fieldKey, !!b!.lock(fieldKey!))}` : ''}`}>
+      className={`relative min-w-0 ${className} ${span} ${pickable ? `group/field ${pickFrame(b!.selected === fieldKey)}` : ''}`}>
       {editing
         ? <BuilderLabel label={label} fieldKey={fieldKey} required={required} />
         : (
           <label className="mb-1.5 flex min-h-5 items-start gap-1 field-label" title={label}>
-            <span className="min-w-0">{label || '\u00a0'}{required && <span className="text-danger-fg">&nbsp;*</span>}</span>
+            <span className="min-w-0">{label || '\u00a0'}{required && <span className="req-star">*</span>}</span>
             {info && <Info size={13} className="mt-0.5 shrink-0 text-brand-500" />}
+            {fieldKey && b?.tip(fieldKey) && <span className="mt-px"><InfoTip text={b.tip(fieldKey)!} /></span>}
           </label>
         )}
       <div className={`relative ${faded ? 'pointer-events-none opacity-40' : ''}`}>
@@ -670,6 +673,10 @@ const catKey = (name: string) => `cat:${name}`
 const V2_FIELDS: FieldDef[] = [
   { key: 'addrLift', defaultLabel: 'Lift Available', section: 'Address details', form: 'full', apiPath: 'address.liftAvailable' },
   { key: 'vas', defaultLabel: 'Value Added Services', section: 'Instructions', form: 'full', apiPath: 'consignmentDetails.vas[]' },
+  /* owner, 2026-10-28: a VAS line's optional columns and the carrier are builder fields too (hide · move · size · require) */
+  { key: 'vasTime', defaultLabel: 'Time (min)', section: 'Instructions', form: 'full', apiPath: 'consignmentDetails.vas[].serviceTimeMin' },
+  { key: 'vasRemark', defaultLabel: 'Remark', section: 'Instructions', form: 'full', apiPath: 'consignmentDetails.vas[].remark' },
+  { key: 'carrier', defaultLabel: 'Carrier', section: 'Order details', form: 'full', apiPath: 'consignmentDetails.carrier' },
   /* owner, 2026-09-29: optional and hideable */
   { key: 'vehicleType', defaultLabel: 'Vehicle Type', section: 'Order details', form: 'full', apiPath: 'consignmentDetails.vehicleType' },
   ...GOODS_CATEGORIES.map(({ name }): FieldDef => ({ key: catKey(name), defaultLabel: name, section: 'Handling & scheduling', form: 'full', apiPath: 'consignmentDetails.category[]' })),
@@ -699,8 +706,19 @@ const V2_KEYS = new Set(V2_FIELDS.map((f) => f.key))
 /** the two goods sections: shown / hidden only — not renamed, not under More, not moved */
 const GOODS_SECTIONS = new Set([PKG_SECTION, SKU_SECTION])
 /** controls that are not a field in a grid cell — no Width */
-const NO_WIDTH = new Set([PKG_SECTION, SKU_SECTION, 'vas', 'dedicateTruck', 'vehicleDetails', 'serviceType', 'scannable', 'schedulingConfirmation', 'clearanceRequired', 'splittable',
-  'tags', 'addrLift', 'remarks', 'skuWeight', 'skuDimensions', 'skuCategory', 'skuDescription', 'skuHsn', 'skuOrigin', 'skuUnitCost', 'skuImage'])
+const NO_WIDTH = new Set([PKG_SECTION, SKU_SECTION, 'vas', 'dedicateTruck', 'hubProcessing', 'vehicleDetails', 'serviceType', 'scannable', 'schedulingConfirmation', 'clearanceRequired', 'splittable',
+  'tags', 'addrLift', 'remarks', 'carrier'])
+/** the cards that can be hidden as a whole and their fields (the system's — an account's own fields follow their own switch) */
+const CARD_KEYS: Record<string, string[]> = {
+  'sec-handling': [...GOODS_CATEGORIES.map(({ name }) => catKey(name)), 'scannable', 'splittable', 'clearanceRequired', 'tags', 'hubProcessing',
+    'vehicleDetails', 'labelFormat', 'totalLoadingTime', 'specialInstructions'],
+  'sec-extras': ['vas', 'vasTime', 'vasRemark'],
+  'sec-svctype': ['serviceType'],
+  'sec-carrier': ['carrier'],
+}
+const CARD_OF_KEY = new Map(Object.entries(CARD_KEYS).flatMap(([id, ks]) => ks.map((k) => [k, id] as const)))
+/** a field's width before the builder sets one (M otherwise) — a note wants room */
+const DEFAULT_WIDTH: Record<string, FieldWidth> = { specialInstructions: 'l' }
 const FIELD_DEF = new Map([...CONSIGNMENT_FIELDS, ...V2_FIELDS].map((f) => [f.key, f]))
 /* 2026-10-05 (owner: "in Service Type I can't hide that field"): Service Type is no longer locked — hidden, every
    consignment gets the builder's DEFAULT service (its rule's `defaultValue`); a draft / Modify keeps its own */
@@ -714,10 +732,12 @@ const FIELD_DEF = new Map([...CONSIGNMENT_FIELDS, ...V2_FIELDS].map((f) => [f.ke
 const SYSTEM_LOCKED = new Set(['orderNumber'])
 const FORM_LOCKED = new Set(['addrName', 'addrLine1', 'addrCountry', 'addrState', 'addrCity'])
 /** fields that start REQUIRED while shown (the form needed them before 2026-10-07) — the builder can make them optional */
-const DEFAULT_REQUIRED = new Set(['referenceNumber', 'merchant', 'pkgWeight', 'skuWeight', 'skuDimensions', 'addrContact'])
+const DEFAULT_REQUIRED = new Set(['carrier', 'referenceNumber', 'merchant', 'pkgWeight', 'skuWeight', 'skuDimensions', 'addrContact'])
 /** a value that is always valid — can be hidden, never "required" */
-const NOT_REQUIRABLE = new Set(['scannable', 'schedulingConfirmation', 'clearanceRequired', 'splittable', 'dedicateTruck', 'serviceType',
+const NOT_REQUIRABLE = new Set(['scannable', 'schedulingConfirmation', 'clearanceRequired', 'splittable', 'dedicateTruck', 'hubProcessing', 'serviceType',
   'consignmentType', 'shipByDate', ...[...V2_KEYS].filter((k) => k !== 'skuOrigin' && k !== 'addrPostal' && k !== 'remarks')])
+/** Format ("what can be typed") is retired (owner, 2026-10-27) — the switch that keeps its code readable */
+const FORMAT_RULES_ON = false
 /** the typed-text fields a Format can check (2026-10-05) — the system's mandatory identifiers included; custom Text fields too */
 const FORMATABLE = new Set(['orderNumber', 'referenceNumber', 'consignmentNumber', 'exchangeOrderNumber',
   'addrCompanyName', 'addrEmail', 'addrLandmark', 'addrSuburb', 'addrContact', 'specialInstructions', 'remarks',
@@ -730,14 +750,21 @@ const SKU_ROW_KEYS = new Set(['skuCategory', 'skuDescription', 'skuHsn', 'skuOri
 /** owner, 2026-10-06 — Grow's own starting places: a SKU's HSN Code · Origin Country · Cost on the line (not folded), and
     Package Id under More (the console keeps it in the package row). The builder can still move them; Grow does not take
     the console's More for these. */
-const GROW_SKU_FRONT = new Set(['skuHsn', 'skuOrigin', 'skuUnitCost'])
+/** owner, 2026-10-28 ("Grow and the consignment form use the same components for Create Order"): off = Grow's Create Order
+    is drawn with the console form's cards (Ship From → Ship To, Package & SKU, Handling, Service & instructions); only its
+    priced Service Type, its Payment card and the Dangerous-goods declaration stay its own. The Grow-team look (2026-10-27)
+    is kept behind this switch. */
+const GROW_OWN_LOOK = false as boolean
+const GROW_SKU_FRONT = new Set(['skuDescription', 'skuHsn', 'skuOrigin', 'skuUnitCost'])
 const GROW_MORE = new Set(['pkgId'])
+/** the fields the Grow form keeps in its own place — the console's More does not move them there */
+const GROW_FIXED_PLACE = new Set([...GROW_SKU_FRONT, ...GROW_MORE])
 /** where a field starts on a portal's form: its section's More fold, or up front */
 const defaultMoreOf = (k: string, grow: boolean) => DEFAULT_MORE.has(k) || (grow && GROW_MORE.has(k))
   || (SKU_ROW_KEYS.has(k) && !(grow && GROW_SKU_FRONT.has(k)))
 /** keys that can sit in a section's More fold (never a locked one); every custom field can */
 const movable = (k: string) => isCustomKey(k) || (FIELD_DEF.has(k) && !SYSTEM_LOCKED.has(k) && !FORM_LOCKED.has(k) && !GOODS_SECTIONS.has(k)
-  && k !== 'vas' && k !== 'serviceType' && k !== 'vehicleDetails' && !k.startsWith('cat:')
+  && k !== 'vas' && k !== 'serviceType' && k !== 'vehicleDetails' && !k.startsWith('cat:') && k !== 'carrier' && k !== 'vasTime' && k !== 'vasRemark'
   && k !== 'consignmentType' && k !== 'shipByDate' && k !== 'merchant')
 
 /** 'last' = one of the Package & SKU card's two sections, the only one still shown */
@@ -749,7 +776,7 @@ const LOCK_TEXT: Record<Exclude<FieldLock, null>, string> = {
 }
 interface Builder {
   editing: boolean
-  /** which form the builder edits */
+  /** which form the builder previews */
   portal: 'console' | 'grow'
   /** a field the builder knows (the registry, the v2 keys, the account's own fields) */
   known: (k: string) => boolean
@@ -769,12 +796,15 @@ interface Builder {
   formatable: (k: string) => boolean
   format: (k: string) => FieldFormat | undefined
   formatError: (k: string, v: string | undefined | null) => string | null
+  /** the explainer shown as an ⓘ beside a field's name, and a typed-text field's character limit (owner, 2026-10-27) */
+  tip: (k: string) => string | undefined
+  maxLen: (k: string) => number | undefined
   /** the account's own field, if `k` is one — removable */
   custom: (k: string) => CustomFieldDef | undefined
   removeCustom: (k: string) => void
-  /** Grow form: changed for Grow (differs from the console form) — and back to the console's setting */
-  overridden: (k: string) => boolean
-  revert: (k: string) => void
+  /** shown on the previewed form but hidden on the other one (Ops only) — and the other way round (Grow only) */
+  onlyHere: (k: string) => boolean
+  onlyThere: (k: string) => boolean
   /** the field whose settings card is open (click-to-select) */
   selected: string | null
   select: (k: string | null) => void
@@ -783,8 +813,18 @@ interface Builder {
   /** how much of its row it takes (S = the normal size) — and whether the builder offers the choice for it */
   width: (k: string) => FieldWidth | undefined
   widthable: (k: string) => boolean
-  /** the eye on the field's frame — hides / shows it at once */
+  /** a card's ⓘ text — the builder's own (rule `card:<id>`), else the card's; null = switched off */
+  cardInfo: (key: string, fallback?: string) => string | null
+  /** the eye on the field's frame — hides / shows it at once (on the previewed form) */
   hide: (k: string, hidden: boolean) => void
+  /** Show for Ops / Show for Grow (owner, 2026-10-28): each form's own switch, and why one cannot change */
+  shownOn: (k: string, p: FormPortal) => boolean
+  showOn: (k: string, p: FormPortal, on: boolean) => void
+  /** null = it can change; else the reason it cannot */
+  showBlock: (k: string, p: FormPortal) => string | null
+  /** the shared Required setting (lit even where the field is hidden) · hidden on both forms */
+  reqSet: (k: string) => boolean
+  offBoth: (k: string) => boolean
 }
 const BuilderCtx = createContext<Builder | null>(null)
 /** false until the first Add Order attempt — then every missing field says so */
@@ -807,9 +847,11 @@ function ErrLine({ children, className = '' }: { children: ReactNode; className?
 /* ---- the builder's preview (2026-10-05 v2): click-to-select. A field the builder knows is ONE click target; its
    settings open in a card beside it. Its label keeps only state tags, so nothing is cut short. ---- */
 /** the dashed frame of a pickable field — brand when selected; a locked field only on hover */
-const pickFrame = (selected: boolean, locked: boolean) => `rounded-md outline-offset-[5px] ${selected
+/* owner, 2026-10-27 ("edit mode should match the form much closely"): no frame at rest — a field shows its dashed frame on
+   hover and a solid one while selected, so the edited form reads as the form itself */
+const pickFrame = (selected: boolean) => `rounded-md outline-offset-[5px] ${selected
   ? 'outline outline-2 outline-brand-500'
-  : locked ? 'hover:outline-dashed hover:outline-1 hover:outline-warm-400' : 'outline-dashed outline-1 outline-warm-300 hover:outline-warm-500'}`
+  : 'hover:outline-dashed hover:outline-1 hover:outline-warm-400'}`
 /** the invisible button over a field in the preview — a click (or Enter) opens its settings */
 function PickHit({ k, label }: { k: string; label: string }) {
   const b = useContext(BuilderCtx)!
@@ -834,8 +876,9 @@ function FieldChips({ k, className = '', hideHidden = false, overlay = false }: 
   if (overlay) return <FieldTools k={k} />
   return (
     <span className={`inline-flex shrink-0 items-center gap-1 ${className}`}>
-      {b.overridden(k) && <span className={`${CHIP} bg-brand-50 font-bold text-brand-600`}>Merchant</span>}
-      {b.isHidden(k) ? !hideHidden && <span className={`${CHIP} bg-warm-100 text-ink-3`}>Hidden</span>
+      {b.onlyHere(k) && <span className={`${CHIP} bg-brand-50 font-bold text-brand-600`}>{b.portal === 'grow' ? 'Grow only' : 'Ops only'}</span>}
+      {b.onlyThere(k) && <span className={`${CHIP} bg-brand-50 font-bold text-brand-600`}>{b.portal === 'grow' ? 'Ops only' : 'Grow only'}</span>}
+      {b.isHidden(k) ? !hideHidden && !b.onlyThere(k) && <span className={`${CHIP} bg-warm-100 text-ink-3`}>Hidden</span>
         : b.inMore(k) && <span className={`${CHIP} bg-warm-100 text-ink-2`}>More</span>}
       {f && <Tip text={formatSummary(f)}><span className={`${CHIP} bg-warm-100 text-ink-2`}>Format</span></Tip>}
       {lock && <Tip text={LOCK_TEXT[lock]}>
@@ -853,18 +896,18 @@ function FieldChips({ k, className = '', hideHidden = false, overlay = false }: 
 function FieldTools({ k }: { k: string }) {
   const b = useContext(BuilderCtx)!
   const lock = b.lock(k)
-  const own = b.ownHidden(k)
-  const parent = b.hiddenWith(k)
-  const req = b.required(k)
+  const both = b.offBoth(k)
+  const req = b.reqSet(k)
   const more = b.inMore(k)
   const fmt = b.format(k)
   const open = b.selected === k
-  const tool = (key: string, on: boolean, tip: string, icon: ReactNode, onClick: () => void, disabled = false) => (
-    <span key={key} className={on || open ? 'inline-flex' : 'hidden group-hover/field:inline-flex'}>
+  const tool = (key: string, on: boolean, tip: string, icon: ReactNode, onClick: () => void, disabled = false, wide = false) => (
+    <span key={key} className={open ? 'inline-flex' : 'hidden group-hover/field:inline-flex'}>
       <Tip text={tip}>
         <button type="button" aria-label={tip} aria-pressed={on} disabled={disabled}
           onClick={(e) => { e.stopPropagation(); onClick() }}
-          className={`inline-flex h-[22px] w-[22px] items-center justify-center rounded-full border shadow-ds-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40
+          className={`inline-flex h-[22px] items-center justify-center gap-1 rounded-full border shadow-ds-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40
+            ${wide ? 'px-2 text-[11px] font-bold' : 'w-[22px]'}
             ${on ? 'border-brand-200 bg-brand-50 text-brand-600' : 'border-line bg-surface text-ink-3 hover:text-ink'}`}>
           {icon}
         </button>
@@ -873,25 +916,35 @@ function FieldTools({ k }: { k: string }) {
   )
   return (
     <span className="absolute -top-[15px] right-1 z-20 inline-flex items-center gap-1">
-      {b.overridden(k) && (
-        <Tip text="Changed for merchants — click to use the operations setting again">
-          <button type="button" onClick={(e) => { e.stopPropagation(); b.revert(k) }}
-            className={`${CHIP} gap-1 border border-brand-100 bg-brand-50 font-bold text-brand-600 hover:border-brand-300`}>Merchant<RotateCcw size={10} /></button>
+      {b.onlyThere(k) && (
+        <Tip text={`Hidden on the ${b.portal === 'grow' ? 'Grow' : 'Ops'} form, shown on the ${b.portal === 'grow' ? 'Ops' : 'Grow'} form`}>
+          <span className={`${CHIP} border border-brand-100 bg-brand-50 font-bold text-brand-600`}>{b.portal === 'grow' ? 'Ops only' : 'Grow only'}</span>
+        </Tip>
+      )}
+      {b.onlyHere(k) && (
+        <Tip text={`Hidden on the ${b.portal === 'grow' ? 'Ops' : 'Grow'} form — click the field to change it`}>
+          <span className={`${CHIP} border border-brand-100 bg-brand-50 font-bold text-brand-600`}>{b.portal === 'grow' ? 'Grow only' : 'Ops only'}</span>
         </Tip>
       )}
       {lock
-        ? <Tip text={LOCK_TEXT[lock]}>
+        ? <span className={open ? 'inline-flex' : 'hidden group-hover/field:inline-flex'}><Tip text={LOCK_TEXT[lock]}>
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface text-warm-400"><Lock size={10} /></span>
-          </Tip>
+          </Tip></span>
         : <>
             {b.requirable(k) && tool('req', req, req ? 'Required — click to make it optional' : 'Make it required', <Asterisk size={12} />,
-              () => b.set(k, { required: !req }), own || !!parent)}
+              () => b.set(k, { required: !req }), both)}
             {b.movable(k) && tool('more', more, more ? 'Under “More” — click to show it up front' : 'Put it under “More”', <ListCollapse size={12} />,
-              () => b.set(k, { more: !more }), own || !!parent || req)}
+              () => b.set(k, { more: !more }), both || req)}
             {b.formatable(k) && tool('fmt', !!fmt, fmt ? `Format: ${formatSummary(fmt)} — click to change it` : 'Set what can be typed', <Regex size={12} />,
               () => b.select(k))}
-            {tool('eye', own || !!parent, parent ? `Hidden because ${b.label(parent)} is hidden` : own ? 'Hidden — click to show it' : 'Hide this field',
-              own || parent ? <EyeOff size={12} /> : <Eye size={12} />, () => b.hide(k, !own), !!parent)}
+            {/* Show for Ops · Show for Grow (owner, 2026-10-28) — lit = shown on that form; a struck eye = hidden there */}
+            {(['console', 'grow'] as const).map((p) => {
+              const who = p === 'grow' ? 'Grow' : 'Ops'
+              const shown = b.shownOn(k, p)
+              const block = b.showBlock(k, p)
+              return tool(`show-${p}`, shown, block ?? (shown ? `Shown for ${who} — click to hide it there` : `Hidden for ${who} — click to show it there`),
+                <>{shown ? <Eye size={11} /> : <EyeOff size={11} />}{who}</>, () => b.showOn(k, p, !shown), !!block, true)
+            })}
             {b.custom(k) && tool('del', false, 'Remove this field', <Trash2 size={11} />, () => b.removeCustom(k))}
           </>}
     </span>
@@ -900,18 +953,19 @@ function FieldTools({ k }: { k: string }) {
 /** The edit-mode label row: the label as the form shows it, then its chips; a field the builder does not know says so. */
 function BuilderLabel({ label, fieldKey, required }: { label?: string; fieldKey?: string; required?: boolean }) {
   const b = useContext(BuilderCtx)!
-  const star = required && <span className="text-danger-fg">&nbsp;*</span>
+  const star = required && <span className="req-star">*</span>
   if (!fieldKey || !b.known(fieldKey)) {
     return (
-      <div className="mb-1.5 flex min-h-5 items-center gap-1 field-label">
-        <span className="min-w-0 truncate" title={label}>{label}{star}</span>
+      <div className="mb-1.5 flex min-h-5 items-start gap-1 field-label">
+        <span className="min-w-0 break-words" title={label}>{label}{star}</span>
         <span className="ml-auto inline-flex shrink-0"><Tip text="Part of the form — always shown"><Lock size={11} className="text-warm-300" /></Tip></span>
       </div>
     )
   }
   return (
-    <div className="mb-1.5 flex min-h-5 items-center field-label">
-      <span className="min-w-0 truncate" title={label}>{label || b.label(fieldKey)}</span>{star}
+    <div className="mb-1.5 flex min-h-5 items-start gap-1 field-label">
+      <span className="min-w-0 break-words" title={label}>{label || b.label(fieldKey)}{star}</span>
+      {b.tip(fieldKey) && <InfoTip text={b.tip(fieldKey)!} />}
       <FieldChips k={fieldKey} overlay />
     </div>
   )
@@ -921,7 +975,7 @@ function Configurable({ fieldKey, children }: { fieldKey: string; children: Reac
   const b = useContext(BuilderCtx)
   if (!b?.editing) return <>{children}</>
   return (
-    <div data-field={fieldKey} className={`group/field relative ${pickFrame(b.selected === fieldKey, false)}`}>
+    <div data-field={fieldKey} className={`group/field relative ${pickFrame(b.selected === fieldKey)}`}>
       <FieldChips k={fieldKey} overlay />
       <div className={b.isHidden(fieldKey) ? 'pointer-events-none opacity-40' : ''}>{children}</div>
       <PickHit k={fieldKey} label={b.label(fieldKey)} />
@@ -1079,20 +1133,23 @@ function InfoTip({ text }: { text: string }) {
   )
 }
 /** A row-adder ("+ Add SKU") — a compact link, not a section button: it adds a line, so it takes a line's height. */
-function AddRowLink({ label, onClick }: { label: string; onClick: () => void }) {
+function AddRowLink({ label, onClick, quiet = false }: { label: string; onClick: () => void
+  /** Grow (owner, 2026-10-27, the Grow team's form): an ink link with a list icon */
+  quiet?: boolean }) {
   return (
     <button type="button" onClick={onClick}
-      className="-ml-1.5 inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[13px] font-bold text-brand-500 hover:bg-warm-50 hover:text-brand-600">
-      <Plus size={14} />{label}
+      className={`-ml-1.5 inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-[13px] font-bold hover:bg-warm-50
+        ${quiet ? 'text-ink hover:text-brand-500' : 'text-brand-500 hover:text-brand-600'}`}>
+      {quiet ? <ListPlus size={15} /> : <Plus size={14} />}{label}
     </button>
   )
 }
 /** the field-order zone that holds the CARDS' order (owner, 2026-10-05: "move sections up and down") */
-const SECTION_ZONE = '__sections'
 const SECTION_TITLES: Record<string, string> = {
-  'sec-consignment': 'Consignment details', 'sec-parties': 'Ship From → Ship To', 'sec-packages': 'Package & SKU',
-  'sec-vehicle': 'Vehicle Details', 'sec-handling': 'Handling', 'sec-extras': 'Service & instructions', 'sec-service': 'Service',
-  'sec-carrier': 'Carriers', 'sec-summary': 'Summary', 'sec-payment': 'Payment',
+  'sec-consignment': 'Consignment details', 'sec-parties': 'Ship From → Ship To', 'sec-to': 'Ship To', 'sec-packages': 'Package & SKU',
+  'sec-vehicle': 'Vehicle Details', 'sec-handling': 'Handling & Instructions', 'sec-extras': 'Value Added Services', 'sec-service': 'Service & instructions',
+  'sec-svctype': 'Service Type',
+  'sec-carrier': 'Carriers', 'sec-summary': 'Summary', 'sec-payment': 'Payment', 'sec-pay': 'Payment',
 }
 /** While the form is edited: a small pill on a card's top edge — move the whole card one place up or down. */
 function SectionMover({ title, first, last, onMove }: { title: string; first: boolean; last: boolean; onMove: (dir: -1 | 1) => void }) {
@@ -1105,7 +1162,7 @@ function SectionMover({ title, first, last, onMove }: { title: string; first: bo
     </Tip>
   )
   return (
-    <div className="absolute -top-3.5 right-6 z-20 inline-flex items-center gap-0.5 rounded-full border border-line bg-surface py-0.5 pl-2.5 pr-0.5 shadow-ds-1">
+    <div className="absolute -top-3.5 right-6 z-20 inline-flex items-center gap-0.5 rounded-full border border-line bg-surface py-0.5 pl-2.5 pr-0.5 opacity-0 shadow-ds-1 transition-opacity focus-within:opacity-100 group-hover/card:opacity-100">
       <span className="mr-1 text-[11px] text-ink-3">Move card</span>
       {btn(-1, first)}{btn(1, last)}
     </div>
@@ -1115,15 +1172,26 @@ function SectionMover({ title, first, last, onMove }: { title: string; first: bo
 function FormCard({ id, title, caption, count, action, children }: {
   id?: string; title?: ReactNode; caption?: string; count?: number; action?: ReactNode; children?: ReactNode
 }) {
+  /* owner, 2026-10-28: the card's ⓘ is set in the form builder (rule `card:<id>`, shared by both forms) — while editing,
+     a click on it opens its settings like a field's */
+  const b = useContext(BuilderCtx)
+  const key = id ? `card:${id}` : null
+  const info = key && b ? b.cardInfo(key, caption) : caption ?? null
+  const infoNode = key && b?.editing ? (
+    <span data-field={key} data-default-tip={caption ?? ''} className={`group/field relative inline-flex ${pickFrame(b.selected === key)}`}>
+      <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full ${info ? 'text-ink-3' : 'text-warm-300'}`}><Info size={14} /></span>
+      <PickHit k={key} label={`the info of ${typeof title === 'string' ? title : 'this card'}`} />
+    </span>
+  ) : info && <InfoTip text={info} />
   return (
-    <section id={id} className="scroll-mt-20 rounded-xl bg-surface p-6">
+    <section id={id} className="scroll-mt-20 rounded-xl bg-surface px-6 py-5">
       {(title || action) && (
-        <div className="mb-6 flex min-h-6 items-center justify-between gap-4">
+        <div className="mb-4 flex min-h-6 items-center justify-between gap-4">
           {title && (
             <h2 className="flex items-center gap-2 text-[15px] font-bold text-ink">
               {title}
               {count !== undefined && <span className="font-normal">{count}</span>}
-              {caption && <InfoTip text={caption} />}
+              {infoNode}
             </h2>
           )}
           {action}
@@ -1139,34 +1207,41 @@ function FormCard({ id, title, caption, count, action, children }: {
    absolute helper / "Required field." line (mt-1 + 16px = 20px) — plus 4px, so a message never touches
    the next row's label: 24px. */
 const FIELD_GAPS = 'gap-x-6 gap-y-6'
-/** the handling toggles' one row (console Handling card, Grow's Handling & extras) */
-const HANDLING_ROW = 'flex flex-wrap items-center gap-x-8 gap-y-3'
-/** how many columns the field grid around a field has on a wide screen — read by a field to size itself (builder Width) */
-const GridColsCtx = createContext(4)
-const LG_SPAN: Record<number, string> = { 2: 'lg:col-span-2', 3: 'lg:col-span-3', 4: 'lg:col-span-4', 6: 'lg:col-span-6' }
-/** the grid classes of a field's Width (owner, 2026-10-07): S = natural · M = half the row · L = three quarters · Full = all.
-    A 2-column grid (an address half) has only natural and full: M = S, L = Full. */
-function widthSpan(w: FieldWidth | undefined, cols: number): string {
-  if (!w || w === 's') return ''
+/** the field grid around a field — whether its columns follow the viewport or a container query (an address half) */
+const GridColsCtx = createContext<{ cq: boolean; own?: boolean }>({ cq: false })
+/** the grid classes of a field's Width (owner, 2026-10-28: "S less than the current width, M the current default, L two
+    columns, Full the whole row"). The grids run at twice the columns and every item takes two (index.css `.fgrid`), so
+    S = one half-column, M = nothing to add, L = four, Full = the row. One column below the breakpoint. */
+function widthSpan(w: FieldWidth | undefined, g: { cq: boolean; own?: boolean }): string {
+  /* a grid that sizes its cells itself (the package row) */
+  if (g.own) return ''
   if (w === 'full') return 'col-span-full'
-  if (cols <= 2) return w === 'l' ? 'col-span-full' : ''
-  const n = w === 'm' ? Math.ceil(cols / 2) : cols - 1
-  if (n >= cols) return 'col-span-full'
-  return `sm:col-span-2 ${LG_SPAN[n] ?? 'col-span-full'}`
+  if (w === 's') return g.cq ? '@min-[380px]:col-span-1' : 'sm:col-span-1'
+  if (w === 'l') return g.cq ? '@min-[380px]:col-span-4' : 'sm:col-span-4'
+  return ''
 }
-/** The console field grid — `cols` equal columns (4 default), SGrid's API with this form's gaps. */
+const GRID = { cq: false }
+const GRID_CQ = { cq: true }
+const GRID_OWN = { cq: true, own: true }
+/** the 3-units-a-field container grid's cell spans (`.fgrid3-cq`): S 2 · M 3 · L 6 — three-box fields (L × W × H) never below 4 */
+const SPAN3: Record<FieldWidth, string> = { s: '@min-[380px]:col-span-2', m: '', l: '@min-[380px]:col-span-6', full: 'col-span-full' }
+const DIMS3: Record<FieldWidth, string> = { s: '@min-[380px]:col-span-4', m: '@min-[380px]:col-span-5', l: '@min-[380px]:col-span-6', full: 'col-span-full' }
+const ROW3 = `fgrid3-cq grid grid-cols-1 items-end gap-x-6 gap-y-6 @min-[380px]:grid-cols-6 @min-[640px]:grid-cols-12 @min-[960px]:grid-cols-18`
+/** The console field grid — `cols` field columns (4 default; the CSS grid has twice as many), SGrid's API with this form's gaps. */
 function SGrid({ children, cols = 4, className = '' }: { children: ReactNode; cols?: 3 | 4 | 5 | 7; className?: string }) {
-  const c = { 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 7: 'lg:grid-cols-7' }[cols]
-  return <GridColsCtx.Provider value={cols}><div className={`grid grid-cols-1 ${FIELD_GAPS} sm:grid-cols-2 ${c} ${className}`}>{children}</div></GridColsCtx.Provider>
+  const c = { 3: 'lg:grid-cols-6', 4: 'lg:grid-cols-8', 5: 'lg:grid-cols-10', 7: 'lg:grid-cols-14' }[cols]
+  /* items-end (owner, 2026-10-28: "box alignment should be maintained"): a label that wraps grows upwards — the boxes of a row
+     stay on one line */
+  return <GridColsCtx.Provider value={GRID}><div className={`fgrid grid grid-cols-1 items-end ${FIELD_GAPS} sm:grid-cols-4 ${c} ${className}`}>{children}</div></GridColsCtx.Provider>
 }
-/** Two equal columns (a party's fields). */
+/** Two equal field columns (a party's fields). */
 function Grid2({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <GridColsCtx.Provider value={2}><div className={`grid grid-cols-1 ${FIELD_GAPS} sm:grid-cols-2 ${className}`}>{children}</div></GridColsCtx.Provider>
+  return <GridColsCtx.Provider value={GRID}><div className={`fgrid grid grid-cols-1 items-end ${FIELD_GAPS} sm:grid-cols-4 ${className}`}>{children}</div></GridColsCtx.Provider>
 }
 /** An address on the form has HALF the card (Ship From | Ship To): two columns while the half is wide enough for a
     phone code + number, one below that (a container query — the half narrows beside the Summary or a pinned rail). */
 function HalfGrid({ children }: { children: ReactNode }) {
-  return <GridColsCtx.Provider value={2}><div className="@container"><div className={`grid grid-cols-1 ${FIELD_GAPS} @min-[380px]:grid-cols-2`}>{children}</div></div></GridColsCtx.Provider>
+  return <GridColsCtx.Provider value={GRID_CQ}><div className="@container"><div className={`fgrid-cq grid grid-cols-1 items-end ${FIELD_GAPS} @min-[380px]:grid-cols-4`}>{children}</div></div></GridColsCtx.Provider>
 }
 /** "One under the other" (owner, 2026-10-06): an address on the form has the card's full width — 2 columns from 380px, 4 from 880px */
 function QuadGrid({ children }: { children: ReactNode }) {
@@ -1283,7 +1358,7 @@ function PartyBlock({ party, set, nameLabel, requireContact, hid, variant = 'ful
       <div>
         {head('Contact details')}
         <G>{who.nodes}</G>
-        <div className="mt-8">{head('Address details')}</div>
+        <div className="mt-6">{head('Address details')}</div>
         <G>{where.nodes}</G>
         {toggle}
       </div>
@@ -1297,7 +1372,7 @@ function PartyBlock({ party, set, nameLabel, requireContact, hid, variant = 'ful
       <div>
         {head('Contact')}
         <Grid2>{who.nodes}</Grid2>
-        <div className="mt-8">{head('Address')}</div>
+        <div className="mt-6">{head('Address')}</div>
         <Grid2>{where.nodes}</Grid2>
         {toggle}
       </div>
@@ -1434,42 +1509,32 @@ function DimsBox({ l, w, h, onChange, error, units = METRIC }: {
 /** An Items-mode line (the Packages section hidden — SKU-based): one SKU and how many units (each unit ships as its own
     piece; the packages are worked out). */
 interface ItemLine { id: string; item: ParcelItem }
-const FORM_TIER_V2_KEY = FORM_TIER_KEY
-/** The Summary card's blocks (2026-10-05; 2026-10-06, owner: "make the Grow summary look like this [the second branch's
-    Shipment Summary], and the console the same view with the details that matter to it"). Blocks stack — a grey label,
-    Edit (jumps to its card), the value, a grey line; `foot` rows sit under them (the totals). Each one can be switched
-    off per portal in the builder; the blocks drag to reorder, the foot stays at the foot. */
+/** The Summary card (owner, 2026-10-28: "how many legs in symbols, the task type, how many SKUs, packages and VAS, icons for
+    hazmat etc — icons only, the most beautiful summary, a flow through icons — and options to show it on Grow or Ops"):
+    five icon rows, each one shown or hidden per form (`FormSummary.hidden`), the whole card on / off per form. */
 interface SummaryLine { key: string; label: string; foot?: boolean }
-const SUMMARY_LINES: Record<'console' | 'grow', SummaryLine[]> = {
-  console: [
-    { key: 'consignment', label: 'Consignment' }, { key: 'shipFrom', label: 'Ship From' }, { key: 'shipTo', label: 'Ship To' },
-    { key: 'legs', label: 'Shipment legs' }, { key: 'goods', label: 'Packages' }, { key: 'service', label: 'Service' },
-    { key: 'carrier', label: 'Carrier' },
-    { key: 'totals', label: 'Pieces & weight', foot: true }, { key: 'eta', label: 'ETA', foot: true },
-  ],
-  grow: [
-    { key: 'shipFrom', label: 'Ship From' }, { key: 'shipTo', label: 'Ship To' }, { key: 'goods', label: 'Packages' },
-    { key: 'service', label: 'Service' }, { key: 'payment', label: 'Payment' },
-    { key: 'totals', label: 'Price', foot: true }, { key: 'eta', label: 'ETA', foot: true },
-  ],
-}
+const SUMMARY_ROWS: SummaryLine[] = [
+  { key: 'route', label: 'Route' }, { key: 'task', label: 'Task' }, { key: 'goods', label: 'Goods' },
+  { key: 'handling', label: 'Handling' }, { key: 'service', label: 'Service' },
+]
+const SUMMARY_LINES: Record<'console' | 'grow', SummaryLine[]> = { console: SUMMARY_ROWS, grow: SUMMARY_ROWS }
 const summaryLinesOf = (p: 'console' | 'grow') => SUMMARY_LINES[p]
 /** the builder's All fields groups, in card order (their fields are listed in the form) */
-const FIELD_GROUP_IDS = ['sec-consignment', 'addresses', 'sec-packages', 'sec-handling', 'sec-service', 'sec-payment']
+const FIELD_GROUP_IDS = ['sec-consignment', 'addresses', 'sec-packages', 'sec-handling', 'sec-extras', 'sec-svctype', 'sec-payment']
 /** the Ship From → Ship To card's choices while the form is edited — one segmented control each (owner, 2026-10-06 / 10-07) */
 const ARRANGE_OPTIONS: { value: AddressArrangement; label: string; sub: string }[] = [
   { value: 'side', label: 'Side by side', sub: 'Ship From left, Ship To right' },
-  { value: 'stack', label: 'One under the other', sub: 'Ship To under Ship From, more room' },
+  { value: 'stack', label: 'Stacked', sub: 'Ship To under Ship From, more room' },
 ]
 const ENTRY_OPTIONS: { value: AddressEntry; label: string; sub: string }[] = [
-  { value: 'cards', label: 'Saved card', sub: 'Pick a saved address, change it in a pop-up' },
-  { value: 'inline', label: 'Fields on form', sub: 'Type the address here, or search saved ones' },
+  { value: 'cards', label: 'Card', sub: 'Pick a saved address, change it in a pop-up' },
+  { value: 'inline', label: 'Fields', sub: 'Type the address here, or search saved ones' },
 ]
 const ADDRESS_LAYOUT_ROWS: { key: 'addresses' | 'shipFrom' | 'shipTo' | 'rto'; label: string; options: { value: string; label: string; sub: string }[] }[] = [
   { key: 'addresses', label: 'Layout', options: ARRANGE_OPTIONS },
   { key: 'shipFrom', label: 'Ship From', options: ENTRY_OPTIONS },
   { key: 'shipTo', label: 'Ship To', options: ENTRY_OPTIONS },
-  { key: 'rto', label: 'RTO address', options: ENTRY_OPTIONS },
+  { key: 'rto', label: 'RTO', options: ENTRY_OPTIONS },
 ]
 
 /**
@@ -1484,14 +1549,35 @@ const ADDRESS_LAYOUT_ROWS: { key: 'addresses' | 'shipFrom' | 'shipTo' | 'rto'; l
 /* 2026-10-07 (owner: "remove this from the Grow portal"): Grow has no Payment card — every order is Prepaid, with no COD amount and no
    remarks (how it is paid is the checkout's one question) */
 const MERCHANT_OFF = new Set(['merchant', 'consignmentNumber', 'totalLoadingTime', 'vehicleType',
-  'addrCoordinates', 'pkgPalletSpace', 'paymentMode', 'orderAmount', 'remarks'])
+  'addrCoordinates', 'pkgPalletSpace', 'paymentMode', 'remarks', 'carrier'])
 /** the console form never has these (Grow's own Payment card asks them) */
 const CONSOLE_OFF = new Set(['remarks'])
 /**
- * The route element. On the console, `?edit=console` opens the form builder on the Console form and `?edit=grow`
- * on the Grow portal form — the Grow merchant form itself, mounted here as its own preview (2026-10-05). The `key`
- * remounts the form when the builder switches between the two.
+ * The route element. On the console, `?edit=console` opens the form builder previewing the Ops form and `?edit=grow`
+ * previewing the Grow form — the Grow merchant form itself, mounted here (2026-10-05). The `key` remounts the form when
+ * the builder switches preview; the working copy goes across in `builderHandoff` (owner, 2026-10-28: ONE builder).
  */
+/** the builder's working copy — both forms' settings at once (./formSetup: shared rules + Show for Ops in `con`, Show for
+    Grow + Grow's Service Type in `grow`; each form's own layout, Summary and card order; the shared field order) */
+interface BuilderDraft {
+  con: FormRulesV2; grow: FormRulesV2; custom: CustomFieldDef[]
+  layout: Record<FormPortal, FormLayout>; summary: Record<FormPortal, FormSummary>
+  /** the shared field order, with the Ops form's card order */
+  order: FormOrder
+  /** the Grow form's card order */
+  growSections: string[] | undefined
+}
+const savedDraft = (): BuilderDraft => ({
+  con: loadRules('console'), grow: loadRules('grow'), custom: loadCustomFields(),
+  layout: { console: loadLayout('console'), grow: loadLayout('grow') },
+  summary: { console: loadSummary('console'), grow: loadSummary('grow') },
+  order: loadOrder('console'), growSections: loadOrder('grow')[SECTION_ZONE],
+})
+/** what the builder hands the other preview when it switches (each preview is its own mount); read on mount, cleared after */
+type BuilderHandoff = { draft: BuilderDraft; selKey: string | null; showHidden: boolean; previewing: boolean }
+let builderHandoff: BuilderHandoff | null = null
+const handBuilder = (h: BuilderHandoff | null) => { builderHandoff = h }
+
 export default function AddConsignmentV2Page({ portal = 'console' }: {
   /** 'merchant' = the Grow Create Order (`/grow/orders/add`): the same form minus the carrier's and ops' features,
       plus the lane's services with ESTIMATED rates, the pickup module's window and checkout / Save for later */
@@ -1510,6 +1596,8 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   setup?: boolean
 }) {
   const merchantMode = portal === 'merchant'
+  /** the Grow-team look (Grow-only cards and package styling) — off: the console's components */
+  const growLook = merchantMode && GROW_OWN_LOOK
   /* the Grow portal form, edited from the console: the merchant form as its own live preview */
   const growSetup = setup && merchantMode
   useEffect(() => { void loadMasters() }, [])
@@ -1526,7 +1614,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     () => packageTypesForMerchant(masters.packageTypes, merchant?.code ?? null),
     [masters.packageTypes, merchant?.code])
   const ownPresets = ownPackageTypes(masters.packageTypes, merchant?.code ?? null)
-  const { pathname, search } = useLocation()
+  const { pathname } = useLocation()
   const [params] = useSearchParams()
   /* ?step=1|2 — QA shortcut: sample parties + identifiers + carrier prefilled, scrolled to the packages (1) / carriers (2) */
   const jump = Math.min(2, Math.max(0, Number(params.get('step')) || 0))
@@ -1563,75 +1651,95 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   /* the account's shared config (read only) + this form's own rules on top (the builder writes these) */
   const [fieldCfg] = useState(loadFieldConfig)
   const [behavior] = useState(loadFormBehavior)
-  /* the console form's rules, Grow's own changes on top of them, and the account's own fields (./formSetup) */
+  /* the saved setup (./formSetup): the console's rules (shared settings + Show for Ops), Grow's own (Show for Grow + its
+     Service Type), and the account's own fields */
   const [savedRules, setSavedRules] = useState<FormRulesV2>(() => loadRules('console'))
   const [savedGrow, setSavedGrow] = useState<FormRulesV2>(() => loadRules('grow'))
   const [savedCustom, setSavedCustom] = useState<CustomFieldDef[]>(loadCustomFields)
-  /* the builder's working copy — of the console rules, or (Grow form) of Grow's own changes */
-  const [draftRules, setDraftRules] = useState<FormRulesV2>(() => (setup ? loadRules(growSetup ? 'grow' : 'console') : {}))
-  const [draftCustom, setDraftCustom] = useState<CustomFieldDef[]>(() => (setup ? loadCustomFields() : []))
-  /* a field added here but kept OFF the other form — that form's hide, written on Save */
-  const [otherHidden, setOtherHidden] = useState<string[]>([])
-  const [editing, setEditing] = useState(setup)
+  /* owner, 2026-10-28: ONE builder for both forms — its working copy holds both, so flipping the preview between the Ops
+     form and the Grow form keeps every unsaved change (it comes across from the other preview's mount) */
+  const [handoff] = useState(() => (setup ? builderHandoff : null))
+  useEffect(() => handBuilder(null), [])
+  const [draft, setDraft] = useState<BuilderDraft>(() => handoff?.draft ?? savedDraft())
+  /* `building` = the builder is open; `previewing` = its Preview (the form exactly as people see it, nothing created) */
+  const [building, setBuilding] = useState(setup)
+  /* the builder edits on the Ops form; the Grow form is only ever previewed (owner, 2026-10-28) */
+  const [previewing, setPreviewing] = useState(setup && (handoff?.previewing ?? merchantMode))
+  const editing = building && !previewing
   const formPortal = merchantMode ? 'grow' as const : 'console' as const
-  const customDefs = editing ? draftCustom : savedCustom
+  const otherPortal = merchantMode ? 'console' as const : 'grow' as const
+  const draftCustom = draft.custom
+  const setDraftCustom = (f: (ds: CustomFieldDef[]) => CustomFieldDef[]) => setDraft((d) => ({ ...d, custom: f(d.custom) }))
+  const customDefs = building ? draftCustom : savedCustom
   const customOf = (k: string) => (isCustomKey(k) ? customDefs.find((d) => d.key === k) : undefined)
   /* the account's own fields' answers, by key */
   const [cfv, setCfv] = useState<Record<string, string>>(() =>
     Object.fromEntries((saved?.consignment?.customFields ?? []).map((f) => [f.key, f.value])))
   /* the Simplified form (owner, 2026-09-29): the original form's quick tier, moved across as it was and restyled;
      not customisable — the builder's rules apply to the regular form only */
-  const [tier, setTierState] = useState<'full' | 'simplified'>(() => {
-    try { return localStorage.getItem(FORM_TIER_V2_KEY) === 'simplified' ? 'simplified' : 'full' } catch { return 'full' }
-  })
-  const simple = !merchantMode && tier === 'simplified' && !editing
-  const setTier = (t: 'full' | 'simplified') => {
-    setTierState(t)
-    try { localStorage.setItem(FORM_TIER_V2_KEY, t) } catch { /* private mode */ }
-    setShowErrors(false)
-  }
-  /* owner, 2026-09-29: a field customised on the console form (hidden · renamed · More · Required) is the same on
-     Grow — the saved builder rules, plus the Form Fields tab's Grow-only Required. 2026-10-05: the Grow portal form's
-     own changes go on top (`formSetup.growRules`), field by field. */
-  const growBase = useMemo<FormRulesV2>(() => {
-    const out: FormRulesV2 = { ...savedRules }
+  /* owner, 2026-10-27: "remove simplified form" — ONE form; a stored Simplified choice is ignored, the footer has no switch.
+     `simple` stays (always false) so the tier's code paths read as before. */
+  const simple = false as boolean
+  /* owner, 2026-10-28: the console wins every conflict — Grow takes the console's shared settings (name, Required, More,
+     width, explainer, limit) plus the Form Fields tab's Grow-only Required; it keeps only Show for Grow and its own
+     Service Type (`formSetup.growRules`). Grow also starts some fields in its own place (GROW_SKU_FRONT, GROW_MORE —
+     its SKU table), so the console's More does not move them. */
+  const conNow = building ? draft.con : savedRules
+  const growNow = building ? draft.grow : savedGrow
+  const merchantRules = useMemo<FormRulesV2>(() => {
+    const out: FormRulesV2 = { ...conNow }
     for (const k of behavior.required ?? []) if (!out[k]?.hidden) out[k] = { ...out[k], required: true }
-    /* Grow starts some fields in its own place (GROW_SKU_FRONT, GROW_MORE) — the console's More does not move them */
-    for (const k of [...GROW_SKU_FRONT, ...GROW_MORE]) {
+    for (const k of GROW_OWN_LOOK ? [...GROW_SKU_FRONT, ...GROW_MORE] : []) {
       if (out[k]?.more === undefined) continue
       const rest: FieldRuleV2 = { ...out[k] }
       delete rest.more
       if (Object.keys(rest).length) out[k] = rest; else delete out[k]
     }
-    return out
-  }, [savedRules, behavior])
-  const growChanges = growSetup && editing ? draftRules : savedGrow
-  const merchantRules = useMemo<FormRulesV2>(() => growRules(growBase, growChanges), [growBase, growChanges])
-  const rules = merchantMode ? merchantRules : editing ? draftRules : savedRules
-  /* the Package & SKU card's two sections (owner, 2026-10-06): both shown = each package with its SKUs; SKUs hidden =
-     packages only; Packages hidden = SKU-based. Never both — if Grow's own hide meets the console's other one, Grow's wins
-     (else the SKUs show); the one still shown is locked ('last'). */
-  const rawOff = (k: string) => !!rules[k]?.hidden
-  const pkgOff = rawOff(PKG_SECTION) && !(rawOff(SKU_SECTION) && merchantMode && !!growChanges[SKU_SECTION]?.hidden)
-  const skuOff = rawOff(SKU_SECTION) && !pkgOff
-  const lockOf = (k: string): FieldLock => (SYSTEM_LOCKED.has(k) ? 'system' : FORM_LOCKED.has(k) ? 'form'
-    : (k === PKG_SECTION && skuOff) || (k === SKU_SECTION && pkgOff) ? 'last' : null)
+    return growRules(out, growNow)
+  }, [conNow, growNow, behavior])
+  const rulesOf = (p: FormPortal) => (p === 'grow' ? merchantRules : conNow)
+  const rules = rulesOf(formPortal)
+  const offOn = (p: FormPortal) => (p === 'grow' ? MERCHANT_OFF : CONSOLE_OFF)
+  /* the Package & SKU card's two sections (owner, 2026-10-06), per form: both shown = each package with its SKUs; SKUs
+     hidden = packages only; Packages hidden = SKU-based. Never both — the one still shown is locked ('last'). */
+  const rawOffOn = (p: FormPortal, k: string) => !!rulesOf(p)[k]?.hidden
+  const pkgOffOn = (p: FormPortal) => rawOffOn(p, PKG_SECTION)
+  const skuOffOn = (p: FormPortal) => rawOffOn(p, SKU_SECTION) && !pkgOffOn(p)
+  const pkgOff = pkgOffOn(formPortal)
+  const skuOff = skuOffOn(formPortal)
+  /* owner, 2026-10-28 ("Packages or SKUs must show — make it editable too"): no 'last' lock any more — hiding the one still
+     shown brings the other one back (setShown / setRule), so a form always asks one of them */
+  const lockOn = (k: string): FieldLock => (SYSTEM_LOCKED.has(k) ? 'system' : FORM_LOCKED.has(k) ? 'form' : null)
+  const lockOf = (k: string) => lockOn(k)
   const baseHidden = (k: string) => !!fieldCfg[k]?.hidden || behavior.hidden.includes(k)
-  const ownHidden = (k: string) => (merchantMode ? MERCHANT_OFF : CONSOLE_OFF).has(k) || (!lockOf(k) && (rules[k]?.hidden ?? baseHidden(k)))
-  const hiddenWith = (k: string): string | null => {
+  /** Show for Ops / Show for Grow off — each form's own switch */
+  /* owner, 2026-10-28 ("do not block Grow and Ops show / hide — let the user decide"): a field a form does not have by
+     default (MERCHANT_OFF on Grow, CONSOLE_OFF on Ops) starts hidden there, and Show for Grow / Ops can switch it on */
+  const ownHiddenOn = (k: string, p: FormPortal) => !lockOn(k) && (rulesOf(p)[k]?.hidden ?? (offOn(p).has(k) || baseHidden(k)))
+  const hiddenWithOn = (k: string, p: FormPortal): string | null => {
     const parent = FIELD_DEF.get(k)?.dependsOn
-    return parent && (ownHidden(parent) || hiddenWith(parent)) ? parent : null
+    /* owner, 2026-10-27 (Order Amount on Grow): a parent the Grow portal never has (Payment Mode) does not hide its
+       dependant there — a Grow order is prepaid, its amount stands alone */
+    if (parent && p === 'grow' && MERCHANT_OFF.has(parent) && rulesOf(p)[parent]?.hidden === undefined) return null
+    return parent && (ownHiddenOn(parent, p) || hiddenWithOn(parent, p)) ? parent : null
   }
-  const isHidden = (k: string) => ownHidden(k) || !!hiddenWith(k)
+  const hiddenOn = (k: string, p: FormPortal) => ownHiddenOn(k, p) || !!hiddenWithOn(k, p)
+  const ownHidden = (k: string) => ownHiddenOn(k, formPortal)
+  const hiddenWith = (k: string) => hiddenWithOn(k, formPortal)
+  const isHidden = (k: string) => hiddenOn(k, formPortal)
   const known = (k: string) => FIELD_DEF.has(k) || !!customOf(k)
   /* a Yes / No field always holds a value — never "required", like the switches */
   const requirable = (k: string) => known(k) && !lockOf(k) && !NOT_REQUIRABLE.has(k) && customOf(k)?.kind !== 'yesno'
   const need = (k: string) => !simple && requirable(k) && !isHidden(k) && (rules[k]?.required ?? DEFAULT_REQUIRED.has(k))
-  const inMore = (k: string) => movable(k) && !need(k) && (rules[k]?.more ?? defaultMoreOf(k, merchantMode))
+  const inMore = (k: string) => movable(k) && !need(k) && (rules[k]?.more ?? defaultMoreOf(k, growLook))
   /* a field that sits in a grid cell or a package line can be made wider; chips, switches and whole sections have no width */
   const widthable = (k: string) => known(k) && !lockOf(k) && !k.startsWith('cat:') && !NO_WIDTH.has(k) && customOf(k)?.kind !== 'yesno'
   /* Format (2026-10-05): the typed-text fields; 'any' = no check (how the Grow form drops a console Format) */
-  const formatable = (k: string) => FORMATABLE.has(k) || customOf(k)?.kind === 'text'
+  /* the typed-text fields (a Format once checked them; now they take a character limit) */
+  const textField = (k: string) => FORMATABLE.has(k) || customOf(k)?.kind === 'text'
+  /* owner, 2026-10-27: "remove validation thing from form builder" — Format is retired: no field takes one, an old saved
+     rule is never applied */
+  const formatable = (_k: string) => FORMAT_RULES_ON && textField(_k)
   const fmtOf = (k: string) => { const f = formatable(k) ? rules[k]?.format : undefined; return f && f.preset !== 'any' ? f : undefined }
   /* a hidden field is never checked; the Simplified form is not customisable */
   const fmtErr = (k: string, v: string | undefined | null) => (simple || isHidden(k) ? null : formatError(fmtOf(k), v))
@@ -1639,44 +1747,59 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   /* editing = the live preview: every field renders (hidden ones faded) so it can be brought back */
   /* the builder's eye (icon only): hidden fields shown faded (default) or left out while editing */
   /* owner, 2026-10-05: off by default — the preview reads as the real form; turn it on (or use All fields) to bring one back */
-  const [showHidden, setShowHidden] = useState(false)
-  /* a field the Grow portal never has (MERCHANT_OFF) stays out of its preview too — nothing to switch on */
-  const hid = (key: string) => (merchantMode ? MERCHANT_OFF : CONSOLE_OFF).has(key) || (editing ? !showHidden && isHidden(key) : isHidden(key))
+  const [showHidden, setShowHidden] = useState(handoff?.showHidden ?? false)
+  /* owner, 2026-10-28 ("I have hidden it — still shown"): Edit shows the Ops form as it is — a hidden field leaves it; "Show hidden
+     fields" brings every hidden one back, faded (one Grow still shows is tagged "Grow only") */
+  /* owner, 2026-10-28 ("the VAS card hidden for Ops, shown for Grow — it stopped showing in the form builder"): a CARD hidden for Ops
+     but shown on Grow stays in Edit, faded and tagged "Grow only", its fields with it — so it can still be set up */
+  const growOnlyCard = (id: string) => {
+    const ks = CARD_KEYS[id]
+    return !!ks && ks.every((k) => hiddenOn(k, 'console')) && ks.some((k) => !hiddenOn(k, 'grow'))
+  }
+  const hid = (key: string) => (editing
+    ? !showHidden && isHidden(key) && !(CARD_OF_KEY.has(key) && growOnlyCard(CARD_OF_KEY.get(key)!))
+    : isHidden(key))
   const lbl = (key: string) => rules[key]?.label?.trim() || customOf(key)?.label
     || (V2_KEYS.has(key) ? FIELD_DEF.get(key)!.defaultLabel : fieldLabel(key, fieldCfg))
-  /** a rule with its defaults filled in — the Grow form keeps only what really differs from the console form */
+  /** a rule with its defaults filled in — two rules that read the same compare equal */
   const norm = (k: string, r?: FieldRuleV2) => ({
     hidden: r?.hidden ?? baseHidden(k), required: r?.required ?? DEFAULT_REQUIRED.has(k), label: r?.label?.trim() ?? '',
-    more: r?.more ?? defaultMoreOf(k, merchantMode), width: r?.width ?? '', format: JSON.stringify(r?.format && r.format.preset !== 'any' ? r.format : null),
-    value: r?.defaultValue?.trim() ?? '',
+    more: r?.more ?? defaultMoreOf(k, growLook), width: r?.width ?? '', format: JSON.stringify(r?.format && r.format.preset !== 'any' ? r.format : null),
+    value: r?.defaultValue?.trim() ?? '', tip: r?.tooltip?.trim() ?? '', max: r?.maxLength ?? 0, notip: !!r?.noTip,
   })
-  const setRule = (k: string, patch: FieldRuleV2) => setDraftRules((r) => {
-    const cur: FieldRuleV2 = growSetup ? { ...growBase[k], ...r[k], ...patch } : { ...r[k], ...patch }
-    if (patch.hidden) cur.required = false
-    if (patch.required) cur.hidden = false
-    /* a field that starts required (DEFAULT_REQUIRED) comes back required when it is shown again */
-    if (patch.hidden === false && DEFAULT_REQUIRED.has(k) && cur.required === false) delete cur.required
-    if (!growSetup) return { ...r, [k]: cur }
-    const base = norm(k, growBase[k])
-    const next = norm(k, cur)
-    const diff: FieldRuleV2 = {
-      ...(next.hidden !== base.hidden ? { hidden: next.hidden } : {}),
-      ...(next.required !== base.required ? { required: next.required } : {}),
-      ...(next.label !== base.label && next.label ? { label: next.label } : {}),
-      ...(next.more !== base.more ? { more: next.more } : {}),
-      ...(next.width !== base.width ? { width: cur.width ?? ('s' as const) } : {}),
-      ...(next.format !== base.format ? { format: cur.format && cur.format.preset !== 'any' ? cur.format : { preset: 'any' as const } } : {}),
-      ...(next.value !== base.value && next.value ? { defaultValue: next.value } : {}),
-    }
-    const out = { ...r }
-    if (Object.keys(diff).length) out[k] = diff
-    else delete out[k]
-    return out
+  /** Show for Ops / Show for Grow — one form's switch; the other form keeps its own */
+  const setShown = (k: string, p: FormPortal, on: boolean) => {
+    /* Packages and SKUs: switching off the one still shown on that form shows the other (a form asks one of them) */
+    const other = k === PKG_SECTION ? SKU_SECTION : k === SKU_SECTION ? PKG_SECTION : null
+    const swap = !on && !!other && rawOffOn(p, other)
+    if (swap) toast.info(`${k === SKU_SECTION ? 'Packages' : 'SKUs'} shown instead on the ${p === 'grow' ? 'Grow' : 'Ops'} form — it asks one of them`)
+    setDraft((d) => {
+      const side = p === 'grow' ? 'grow' : 'con'
+      const r = { ...d[side], [k]: { ...d[side][k], hidden: !on } }
+      if (swap && other) r[other] = { ...r[other], hidden: false }
+      return { ...d, [side]: r }
+    })
+  }
+  /* every other setting is SHARED — it goes to the console's rules, both forms read it (the console wins). Grow's own
+     Service Type is the exception: on the Grow preview its whole rule is Grow's. Show / hide goes to the previewed form. */
+  const setRule = (k: string, patch: FieldRuleV2) => setDraft((d) => {
+    if (merchantMode && GROW_OWN_KEYS.has(k)) return { ...d, grow: { ...d.grow, [k]: { ...d.grow[k], ...patch } } }
+    const { hidden, ...shared } = patch
+    const side = merchantMode ? 'grow' : 'con'
+    let con = d.con
+    let grow = d.grow
+    const show = (h: boolean) => { if (side === 'grow') grow = { ...grow, [k]: { ...grow[k], hidden: h } }; else con = { ...con, [k]: { ...con[k], hidden: h } } }
+    if (hidden !== undefined) show(hidden)
+    if (Object.keys(shared).length) con = { ...con, [k]: { ...con[k], ...shared } }
+    /* Required means it is asked — on the form being previewed it shows (a hide no longer clears Required: the other
+       form may still ask it) */
+    if (shared.required) show(false)
+    return { ...d, con, grow }
   })
   /* the Add field dialog — opened from a card (that card) or from All fields (null: the dialog asks where) */
   const [addCard, setAddCard] = useState<CustomFieldCard | null | false>(false)
   /* the builder's selection (click-to-select in the preview) and its All fields dialog */
-  const [selKey, setSelKey] = useState<string | null>(null)
+  const [selKey, setSelKey] = useState<string | null>(handoff?.selKey ?? null)
   const [allOpen, setAllOpen] = useState(false)
   const [allQuery, setAllQuery] = useState('')
   const [allKey, setAllKey] = useState<string | null>(null)
@@ -1687,41 +1810,76 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     setOpenGroups(new Set(id ? [id] : FIELD_GROUP_IDS))
     setAllOpen(true)
   }
-  const removeCustom = (k: string) => {
-    setDraftCustom((ds) => ds.filter((d) => d.key !== k))
-    setDraftRules((r) => withoutKeys(r, [k]))
-    setOtherHidden((xs) => xs.filter((x) => x !== k))
-  }
+  /** switched off on exactly one form (a field one form never has is not counted — nothing to switch there) */
+  /* a field off by default on one form (and never switched there) is not tagged — that is how the form starts */
+  const byDefault = (k: string) => (MERCHANT_OFF.has(k) && growNow[k]?.hidden === undefined) || (CONSOLE_OFF.has(k) && conNow[k]?.hidden === undefined)
+  const onOneForm = (k: string) => !byDefault(k) && hiddenOn(k, 'console') !== hiddenOn(k, 'grow')
+  const removeCustom = (k: string) => setDraft((d) => ({
+    ...d, custom: d.custom.filter((x) => x.key !== k), con: withoutKeys(d.con, [k]), grow: withoutKeys(d.grow, [k]),
+  }))
   const builder: Builder = {
     editing, portal: formPortal, known, lock: lockOf, requirable, ownHidden, isHidden, hiddenWith, required: need, inMore, label: lbl, set: setRule,
-    width: (k) => rules[k]?.width, widthable,
-    formatable, format: fmtOf, formatError: fmtErr,
+    width: (k) => rules[k]?.width ?? DEFAULT_WIDTH[k], widthable,
+    formatable, format: fmtOf, formatError: fmtErr, tip: (k: string) => rules[k]?.tooltip, maxLen: (k: string) => (textField(k) ? rules[k]?.maxLength : undefined),
     custom: customOf, removeCustom,
-    overridden: (k) => growSetup && editing && !!draftRules[k], revert: (k) => setDraftRules((r) => withoutKeys(r, [k])),
+    onlyHere: (k) => onOneForm(k) && !hiddenOn(k, formPortal),
+    onlyThere: (k) => onOneForm(k) && hiddenOn(k, formPortal),
     selected: editing ? selKey : null, select: setSelKey,
     movable: (k) => movable(k),
     hide: (k, on) => {
+      if (GOODS_SECTIONS.has(k)) { setShown(k, formPortal, !on); return }
       setRule(k, { hidden: on })
       /* a goods section's switch stays on its card — say what the form asks now */
       if (on && GOODS_SECTIONS.has(k)) toast.info(k === SKU_SECTION ? 'SKUs hidden — the form asks for packages only' : 'Packages hidden — the form asks for SKUs and how many')
-      else if (on && !showHidden) toast.info(`${lbl(k)} is hidden — All fields or “Show hidden fields” brings it back`)
+      else if (on && !showHidden) toast.info(`${lbl(k)} is hidden for ${merchantMode ? 'Grow' : 'Ops'} — All fields or “Show hidden fields” brings it back`)
     },
+    shownOn: (k, p) => !ownHiddenOn(k, p),
+    cardInfo: (key, fallback) => (rules[key]?.noTip ? null : rules[key]?.tooltip?.trim() || fallback || null),
+    showOn: (k, p, on) => setShown(k, p, on),
+    showBlock: (k, p) => {
+      const who = p === 'grow' ? 'Grow' : 'Ops'
+      const lk = lockOn(k)
+      if (lk) return LOCK_TEXT[lk]
+      const par = hiddenWithOn(k, p)
+      return par && !ownHiddenOn(k, p) ? null : par ? `Hidden for ${who} — and it follows ${lbl(par)}, which is hidden there` : null
+    },
+    reqSet: (k) => requirable(k) && (rules[k]?.required ?? DEFAULT_REQUIRED.has(k)),
+    offBoth: (k) => hiddenOn(k, 'console') && hiddenOn(k, 'grow'),
   }
-  /* how the form looks — addresses as cards or fields on the form; Grow's services as a grid or a list (./formSetup) */
+  /* how the form looks — each form's own (owner, 2026-10-28: the UI styles differ): addresses as cards or fields on the
+     form, Grow's services as cards or a menu (./formSetup) */
   const [savedLayout, setSavedLayout] = useState<FormLayout>(() => loadLayout(formPortal))
-  const [draftLayout, setDraftLayout] = useState<FormLayout>(() => loadLayout(formPortal))
-  const layout = editing ? draftLayout : savedLayout
+  const draftLayout = draft.layout[formPortal]
+  const setLayoutOf = (p: FormPortal, f: (l: FormLayout) => FormLayout) => setDraft((d) => ({ ...d, layout: { ...d.layout, [p]: f(d.layout[p]) } }))
+  const setDraftLayout = (f: (l: FormLayout) => FormLayout) => setLayoutOf(formPortal, f)
+  /* while editing, a card's own display options open from its header (owner, 2026-10-27: the card looks like the form) */
+  const [cardOpts, setCardOpts] = useState<string | null>(null)
+  const layout = building ? draftLayout : savedLayout
   /* "Fields on the form", per address (owner, 2026-10-05: "individually configured, RTO also"): that address is typed
      in the card under a search of the saved ones (the Simplified form keeps cards) */
   const ADDR_ROLE = { from: 'shipFrom', to: 'shipTo', rto: 'rto' } as const
   const inlineOf = (role: 'from' | 'to' | 'rto') => !simple && layout[ADDR_ROLE[role]] === 'inline'
-  /* the fields' order inside each section, and the Summary card (2026-10-05) — edited and saved with the rest */
+  /* the fields' order (shared) and this form's card order, and the Summary card (each form's own) */
   const [savedOrder, setSavedOrder] = useState<FormOrder>(() => loadOrder(formPortal))
-  const [draftOrder, setDraftOrder] = useState<FormOrder>(() => loadOrder(formPortal))
-  const fieldOrder = editing ? draftOrder : savedOrder
+  const draftOrder = useMemo<FormOrder>(() => {
+    if (!merchantMode) return draft.order
+    const out = { ...draft.order }
+    delete out[SECTION_ZONE]
+    return draft.growSections ? { ...out, [SECTION_ZONE]: draft.growSections } : out
+  }, [draft.order, draft.growSections, merchantMode])
+  const setDraftOrder = (f: (o: FormOrder) => FormOrder) => setDraft((d) => {
+    if (!merchantMode) return { ...d, order: f(d.order) }
+    const cur = { ...d.order }
+    delete cur[SECTION_ZONE]
+    const next = f(d.growSections ? { ...cur, [SECTION_ZONE]: d.growSections } : cur)
+    const shared = { ...next }
+    delete shared[SECTION_ZONE]
+    return { ...d, order: d.order[SECTION_ZONE] ? { ...shared, [SECTION_ZONE]: d.order[SECTION_ZONE] } : shared, growSections: next[SECTION_ZONE] }
+  })
+  const fieldOrder = building ? draftOrder : savedOrder
   const [savedSummary, setSavedSummary] = useState<FormSummary>(() => loadSummary(formPortal))
-  const [draftSummary, setDraftSummary] = useState<FormSummary>(() => loadSummary(formPortal))
-  const summaryCfg = editing ? draftSummary : savedSummary
+  const draftSummary = draft.summary[formPortal]
+  const summaryCfg = building ? draftSummary : savedSummary
   const [drag, setDrag] = useState<SortApi['drag']>(null)
   const [over, setOver] = useState<SortApi['over']>(null)
   const sortApi: SortApi = {
@@ -1733,9 +1891,8 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     move: (zone, ids, moved, target, after) => setDraftOrder((o) => ({ ...o, [zone]: moveId(ids, moved, target, after) })),
   }
   const startEditing = () => {
-    setDraftRules(savedRules); setDraftCustom(savedCustom); setOtherHidden([]); setDraftLayout(savedLayout)
-    setDraftOrder(savedOrder); setDraftSummary(savedSummary)
-    setSelKey(null); setShowErrors(false); setEditing(true)
+    setDraft(savedDraft())
+    setSelKey(null); setShowErrors(false); setPreviewing(false); setBuilding(true)
   }
   /* the builder opened by URL (`?edit=`) hands back to the plain console form when it is done */
   const leaveSetup = () => {
@@ -1743,52 +1900,48 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     const next = new URLSearchParams(params)
     next.delete('edit')
     const q = next.toString()
-    nav({ pathname, search: q ? `?${q}` : '' }, { replace: true })
+    nav({ pathname: merchantMode ? '/local/consignments/new' : pathname, search: q ? `?${q}` : '' }, { replace: true })
   }
-  const cancelEditing = () => { setSelKey(null); setEditing(false); leaveSetup() }
+  const cancelEditing = () => { setSelKey(null); setBuilding(false); setPreviewing(false); setShowErrors(false); leaveSetup() }
   const sameRules = (a: FormRulesV2, b: FormRulesV2) =>
     [...new Set([...Object.keys(a), ...Object.keys(b)])].every((k) => JSON.stringify(norm(k, a[k])) === JSON.stringify(norm(k, b[k])))
-  /* Grow compares what its form SHOWS — a Grow change that shows a field the console hides is `hidden: false`, which
-     reads like no change on its own */
-  const dirty = editing && (!(growSetup ? sameRules(growRules(growBase, draftRules), growRules(growBase, savedGrow)) : sameRules(draftRules, savedRules))
-    || JSON.stringify(draftCustom) !== JSON.stringify(savedCustom)
-    || JSON.stringify(draftLayout) !== JSON.stringify(savedLayout)
-    || JSON.stringify(draftOrder) !== JSON.stringify(savedOrder) || JSON.stringify(draftSummary) !== JSON.stringify(savedSummary))
-  const saveEditing = (then?: () => void) => {
-    const removed = savedCustom.filter((d) => !draftCustom.some((x) => x.key === d.key)).map((d) => d.key)
-    const added = new Set(draftCustom.filter((d) => !savedCustom.some((x) => x.key === d.key)).map((d) => d.key))
-    const keepOff = otherHidden.filter((k) => added.has(k))
-    const mine = withoutKeys(draftRules, removed)
-    const other = withoutKeys(loadRules(growSetup ? 'console' : 'grow'), removed)
-    for (const k of keepOff) other[k] = { ...other[k], hidden: true }
-    /* a field added on Grow and kept off the console: Grow shows it in its own right */
-    if (growSetup) for (const k of keepOff) if (mine[k]?.hidden === undefined) mine[k] = { ...mine[k], hidden: false }
-    saveRules(formPortal, mine)
-    saveRules(growSetup ? 'console' : 'grow', other)
-    saveCustomFields(draftCustom)
-    /* both portals' rules now hold the retired "How goods are entered" as the section hides */
+  const sameGrow = (a: FormRulesV2, b: FormRulesV2) =>
+    [...new Set([...Object.keys(a), ...Object.keys(b)])].every((k) => (GROW_OWN_KEYS.has(k)
+      ? JSON.stringify(norm(k, a[k])) === JSON.stringify(norm(k, b[k])) : (a[k]?.hidden ?? null) === (b[k]?.hidden ?? null)))
+  const dirty = useMemo(() => {
+    if (!building) return false
+    const s0 = savedDraft()
+    return !sameRules(draft.con, s0.con) || !sameGrow(draft.grow, s0.grow)
+      || JSON.stringify(draft.custom) !== JSON.stringify(s0.custom) || JSON.stringify(draft.layout) !== JSON.stringify(s0.layout)
+      || JSON.stringify(draft.order) !== JSON.stringify(s0.order) || JSON.stringify(draft.growSections ?? null) !== JSON.stringify(s0.growSections ?? null)
+      || JSON.stringify(draft.summary) !== JSON.stringify(s0.summary)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the saved copies change only with a Save, which ends building
+  }, [building, draft, savedRules, savedGrow])
+  /* Save writes BOTH forms — one builder, one Save */
+  const saveEditing = () => {
+    const removed = savedCustom.filter((d) => !draft.custom.some((x) => x.key === d.key)).map((d) => d.key)
+    saveRules('console', withoutKeys(draft.con, removed))
+    saveRules('grow', withoutKeys(draft.grow, removed))
+    saveCustomFields(draft.custom)
+    /* both forms' rules now hold the retired "How goods are entered" as the section hides */
     clearLegacyGoods()
-    saveLayout(formPortal, draftLayout)
-    saveOrder(formPortal, draftOrder)
-    saveSummary(formPortal, draftSummary)
+    saveLayout('console', draft.layout.console); saveLayout('grow', draft.layout.grow)
+    saveOrder('console', draft.order); saveOrder('grow', draft.growSections ? { [SECTION_ZONE]: draft.growSections } : {})
+    saveSummary('console', draft.summary.console); saveSummary('grow', draft.summary.grow)
     setSavedRules(loadRules('console')); setSavedGrow(loadRules('grow')); setSavedCustom(loadCustomFields())
     setSavedLayout(loadLayout(formPortal)); setSavedOrder(loadOrder(formPortal)); setSavedSummary(loadSummary(formPortal))
-    setSelKey(null); setEditing(false)
+    setSelKey(null); setBuilding(false); setPreviewing(false); setShowErrors(false)
     /* formSync sends the saved setup to the server, so every device and user gets it (owner, 2026-10-06) */
-    toast.success(growSetup ? 'Merchant form saved — merchants see it on Create Order, on every device' : 'Operations form saved — every device shows it')
-    if (then) then(); else leaveSetup()
+    toast.success('Both forms saved — Add Consignment and Grow Create Order show it on every device')
+    leaveSetup()
   }
-  /* the builder's Console | Grow portal switch — unsaved changes are saved or dropped first */
-  const [switchTo, setSwitchTo] = useState<null | 'console' | 'grow'>(null)
-  const goPortal = (p: 'console' | 'grow') => {
+  /* the builder's Ops | Grow preview switch — the working copy goes across, nothing to save first */
+  const switchPortal = (p: FormPortal, preview = previewing) => {
+    if (p === formPortal) return
+    handBuilder({ draft, selKey, showHidden, previewing: preview })
     const next = new URLSearchParams(params)
     next.set('edit', p)
-    nav({ pathname, search: `?${next}` }, { replace: true })
-  }
-  const switchPortal = (p: 'console' | 'grow') => {
-    if (p === formPortal) return
-    if (dirty) setSwitchTo(p)
-    else goPortal(p)
+    nav({ pathname: '/local/consignments/new', search: `?${next}` }, { replace: true })
   }
   /* "More information" per section (and per package): open ones reveal their waiting fields in place */
   const [openSecs, setOpenSecs] = useState<Set<string>>(new Set())
@@ -1916,7 +2069,8 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   /* THE packages every reader uses — only the mode on screen is validated and saved */
   const goods = useItems ? itemParcels : parcels
   const secure = saved?.secure ?? false
-  const noDg = true
+  /* Grow (owner, 2026-10-27, the Grow team's form): the merchant ticks that nothing dangerous is inside */
+  const noDg = !merchantMode || !!c.dgDeclared
   const [service, setService] = useState(() => (merchantMode
     /* Grow: no service until the lane's cards are shown (one eligible card is preselected) */
     ? (saved?.shipmentType === 'FTL' ? saved.ftlServiceType || saved.service : saved?.service ?? pr?.ftlServiceType ?? '')
@@ -1992,8 +2146,6 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const mVehicles: FtlVehicle[] = mode !== 'ftl' ? []
     : vehiclesAuto ? (fleet[0] ? [{ vehicleType: fleet[0].code, actualLoadKg: Math.round(weights.chargeable) || 0, addressIdx: allDrops.map((_, i) => i) }] : [])
     : vehicles.filter((v) => !!v.vehicleType)
-  const vehicleLine = [...new Set(mVehicles.map((v) => v.vehicleType))]
-    .map((t) => `${mVehicles.filter((v) => v.vehicleType === t).length} × ${t}`).join(', ')
   const quotes = !merchantMode || !mode ? [] : !ready
     /* not priced yet: the cards still show, with the service's own transit days and no rate */
     ? quoteLane({ ...zoneParties('local'), parcels: [], mode: lm, currency }, offered)
@@ -2087,7 +2239,8 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const anyInline = inlineOf('from') || inlineOf('to') || (typeRule.rto && c.rtoMode === RTO_MODES[1] && inlineOf('rto'))
   /* owner, 2026-10-06: Ship From | Ship To side by side (default — Saved card or Fields on form, both portals; they stack
      only when the card itself is narrow) or one under the other (the builder's Layout). The Simplified tier keeps its own. */
-  const stackAddr = !simple && layout.addresses === 'stack'
+  /* Grow (owner, 2026-10-27): Ship From and Ship To are two cards, each the full width */
+  const stackAddr = !simple && (growLook || layout.addresses === 'stack')
   const endOf = (p: Party, code?: string): RouteEnd => {
     const lc = code ?? p.locationCode ?? ''
     if (HUB_CODES.has(lc)) return { kind: 'facility', hub: lc }
@@ -2192,6 +2345,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     /* Simplified: the delivery Start / End time on the Ship By Date are required (the original's rule) */
     ...(simple ? [filled(timeOf(receiver.windowStart)), filled(timeOf(receiver.windowEnd))] : []),
     ...(typeRule.payment && !merchantMode ? [...needOk('paymentMode', !!c.paymentMode), ...needOk('orderAmount', (c.orderAmount ?? 0) > 0)] : []),
+    ...(typeRule.payment && merchantMode ? needOk('orderAmount', (c.orderAmount ?? 0) > 0) : []),
     /* Format rules on the numbers as typed (a copied identifier is checked where it is typed) */
     ...(idPref !== 'referenceNumber' ? [fmtOk('orderNumber', c.orderNumber)] : []),
     ...(idPref !== 'orderNumber' ? [fmtOk('referenceNumber', c.referenceNumber)] : []),
@@ -2260,7 +2414,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const vasReq = simple || isHidden('vas') ? [] : (c.vas ?? []).map(vasOk)
   /* Items mode needs at least one SKU picked (a blank line is ignored) */
   const goodsReq = useItems && !typeRule.goodsOptional ? [itemParcels.length > 0] : []
-  const carrierReq = merchantMode ? [] : [!!c.carrier]
+  const carrierReq = merchantMode ? [] : needOk('carrier', !!c.carrier)
   /* owner, 2026-09-29: Vehicle Type is optional; Service Type is required */
   const vehicleReq: boolean[] = []
   const serviceReq = merchantMode
@@ -2272,12 +2426,21 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const handlingReq = [...needOk('tags', (c.tags ?? []).length > 0), ...customReq('sec-handling')]
   /* no Payment card on Grow any more (2026-10-07) and none on the console: nothing here to require */
   const paymentReq: boolean[] = []
-  const extrasReq = [...vasReq, ...needOk('specialInstructions', filled(c.specialInstructions)), fmtOk('specialInstructions', c.specialInstructions),
-    /* Grow asks Label Format in its Service & instructions card */
+  const instrReq = [...needOk('specialInstructions', filled(c.specialInstructions)), fmtOk('specialInstructions', c.specialInstructions),
+    /* Grow asks Label Format in its Handling & Instructions card */
     ...(merchantMode ? needOk('labelFormat', !!c.labelFormat) : []),
     ...customReq('sec-service')]
+  const extrasReq = [...vasReq, ...instrReq]
+  /* Grow is ONE page (owner, 2026-10-27, the Grow team's form): the service and HOW it is paid are asked on the form,
+     and Create Consignment places the order (`placeGrowOrder` — the same placement the old checkout step used) */
+  const growQuote = merchantMode ? quotes.find((q) => q.code === selected) ?? null : null
+  const growRate = growQuote?.net ?? 0
+  const growTax = taxOf(growRate, currency)
+  const growPayable = Math.round((growRate + growTax) * 100) / 100
+  const pay = useSplitPayment({ amount: growPayable, currency, allowCod: merchantMode && typeRule.payment && c.paymentMode === 'COD' })
+  const payReq = merchantMode && !editing ? [!!growQuote, !!growQuote && pay.choice.ready] : []
   const allReq = [...consignmentReq, ...serviceReq, ...fromReq, ...toReq, ...rtoReq, ...routeReq, ...goodsReq, ...pieceReq, ...skuReq,
-    ...handlingReq, ...extrasReq, ...carrierReq, ...paymentReq]
+    ...handlingReq, ...extrasReq, ...carrierReq, ...paymentReq, ...payReq]
   const filledCount = allReq.filter(Boolean).length
   const canSubmit = filledCount === allReq.length
   const missingCount = allReq.length - filledCount
@@ -2418,7 +2581,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   /* the Grow form's preview leaves a merchant's session draft alone */
   useEffect(() => { if (!growSetup) clearDraftKeys() }, [growSetup])
   const jumpTarget = jump === 1 ? (isFtl ? 'sec-vehicle' : 'sec-packages') : jump === 2
-    ? (merchantMode ? (growServiceCard ? 'sec-service' : 'sec-handling') : 'sec-carrier') : null
+    ? (merchantMode ? (growServiceCard ? 'sec-svctype' : 'sec-handling') : 'sec-carrier') : null
   useEffect(() => {
     if (!jumpTarget) return
     const t = setTimeout(() => document.getElementById(jumpTarget)?.scrollIntoView({ block: 'start' }), 150)
@@ -2518,7 +2681,10 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
         rto: typeRule.rto && c.rtoMode === RTO_MODES[1] ? rto : null,
         ...(typeRule.rto ? {} : { rtoMode: RTO_MODES[0] }),
         /* Grow's Payment card (2026-10-07): Prepaid or COD (hidden = Prepaid); the COD amount only for COD; the remarks */
-        paymentMode: growPayMode, orderAmount: growPayMode === 'COD' && !isHidden('orderAmount') ? c.orderAmount ?? null : null,
+        /* 2026-10-27: Order Amount is asked in Consignment details on Grow — kept whenever it is shown */
+        paymentMode: growPayMode, orderAmount: typeRule.payment && !isHidden('orderAmount') ? c.orderAmount ?? null : null,
+        /* how it moves (Delivery type, 2026-10-27) — as the console saves it */
+        ...(movementType ? { movementType } : {}), directPickAndDeliver: legsDirect,
         remarks: isHidden('remarks') ? c.remarks ?? '' : (c.remarks ?? '').trim(),
         ...(ctype === 'Exchange' ? {} : { exchangeOrderNumber: '' }),
         packages: ftl ? [] : goods.map((p) => ({
@@ -2556,9 +2722,9 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     .filter((d) => d.card === card && !hid(d.key))
     .map((d): RevealEntry => [d.key, customNode(d), filled(cfv[d.key])])
   /** while editing: a card's "+ Add field" */
-  const addFieldLink = (card: CustomFieldCard, className = 'mt-6') => (editing ? (
-    <div className={className}><AddRowLink label="Add field" onClick={() => setAddCard(card)} /></div>
-  ) : null)
+  /* owner, 2026-10-28: "remove add field options from the form" — no "+ Add field" on the cards; an own field is added from
+     All fields (its dialog asks which card it goes in) */
+
 
   /* ---- the sections, in dependency order. Parcel: the packages come before Service (Load type and
      the dedicated truck read their weight); FTL: the Service Type comes before the vehicles (it
@@ -2568,30 +2734,42 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   /* owner, 2026-10-06: "Barcode on every box" is ONE switch, back in the Handling card (it was briefly in the Package & SKU
      header) — on, every package line is one box with its own barcode (`barcodeEach`, quantity 1) */
   const barcodeEach = !isFtl && !useItems && !!c.scannable
-  const handlingTogglesVisible = !hid('scannable') || !hid('splittable') || !hid('clearanceRequired') || !hid('tags')
+  const handlingTogglesVisible = !hid('scannable') || !hid('splittable') || !hid('clearanceRequired') || !hid('tags') || !hid('hubProcessing')
   /* the switches row — Barcode · In parts · Clearance · Tags, the SAME on both portals (owner, 2026-10-07: "like the CFT side") */
   const switchesRow = handlingTogglesVisible
   const handlingCustom = arrange(sortApi, 'handling-fields', customEntries('sec-handling'), inMore, secOpen('sec-handling'))
   /* while editing the card always shows — its "+ Add field" lives in it */
   const handlingVisible = handlingChipsVisible || handlingTogglesVisible || handlingCustom.nodes.length > 0 || handlingCustom.waiting > 0 || editing
-  /* the console's Service & instructions card leaves no gap when every field in it is hidden (Service Type included) */
-  const consoleServiceCard = editing || !hid('serviceType') || (!isFtl && (!hid('dedicateTruck') || !hid('vehicleType')))
-    || !hid('labelFormat') || !hid('totalLoadingTime') || !hid('specialInstructions') || !hid('vas')
+  /* Handling & Instructions shows for its handling or its instructions; VAS and Service Type are cards of their own */
+  const instrVisible = !hid('labelFormat') || !hid('totalLoadingTime') || !hid('specialInstructions')
     || customDefs.some((d) => d.card === 'sec-service' && !hid(d.key))
-  const svcSec = consoleServiceCard ? ['sec-service'] : []
+  const hiCard = handlingVisible || instrVisible
+  const vasCard = !hid('vas')
+  const svcTypeSec = editing || !hid('serviceType') ? ['sec-svctype'] : []
+  const carrierSec = !hid('carrier') ? ['sec-carrier'] : []
   /* the Summary card shows while it is on and has a line to show. While the form is edited it follows "Show hidden
      fields" like every field (owner, 2026-10-06: switched off, it stayed in the preview and the switch did nothing):
      off → it leaves the preview, as it leaves the live form; Show hidden fields → back, faded, to switch it on */
-  const summaryShown = !simple && ((summaryCfg.enabled && summaryLinesOf(formPortal).some((l) => !summaryCfg.hidden.includes(l.key))) || (editing && showHidden))
+  /* while editing, the Summary follows the fields' rule (owner, 2026-10-28: "hidden for both Ops and Grow — why is it still
+     shown"): it shows while it is on for EITHER form; off on both, only with "Show hidden fields" (faded, to switch it on) */
+  const sumOnSomewhere = (['console', 'grow'] as const).some((p) => draft.summary[p].enabled
+    && SUMMARY_LINES[p].some((l) => !draft.summary[p].hidden.includes(l.key)))
+  const summaryShown = !simple && (editing ? sumOnSomewhere || showHidden
+    : summaryCfg.enabled && summaryLinesOf(formPortal).some((l) => !summaryCfg.hidden.includes(l.key)))
   /* owner, 2026-10-06 ("summary should be a vertical card, not a horizontal one"): the Summary is no longer a card in
      the flow — it is the vertical card beside the form (see the layout at the bottom), so it takes no place here */
   const sumSec: string[] = []
   /* Grow: no Service Type card on step 1 — it is chosen at checkout; the builder previews it after the cards, unmovable */
-  const sections = merchantMode ? ['sec-consignment', 'sec-parties', 'sec-packages', 'sec-handling', ...((mode === 'ftl' || editing) && vehicleCard ? ['sec-vehicle'] : []),
-    'sec-extras', ...sumSec]
+  /* Grow's priced Service Type (its own card, `sec-svctype`) and Payment — with the console's cards around them (GROW_OWN_LOOK
+     off), or the Grow team's cards (on) */
+  const growSvc = (editing ? growServiceCard : !serviceHidden) ? ['sec-svctype'] : []
+  const sections = growLook ? ['sec-consignment', 'sec-parties', 'sec-to', 'sec-handling', 'sec-packages', ...((mode === 'ftl' || editing) && vehicleCard ? ['sec-vehicle'] : []),
+    'sec-extras', ...growSvc, ...(editing ? [] : ['sec-pay']), ...sumSec]
+    : merchantMode ? ['sec-consignment', 'sec-parties', 'sec-packages', ...((mode === 'ftl' || editing) && vehicleCard ? ['sec-vehicle'] : []),
+      ...(hiCard ? ['sec-handling'] : []), ...(vasCard ? ['sec-extras'] : []), ...growSvc, ...(editing ? [] : ['sec-pay']), ...sumSec]
     : simple ? ['sec-consignment', 'sec-parties', isFtl ? 'sec-vehicle' : 'sec-packages', 'sec-carrier'] : isFtl
-    ? ['sec-consignment', 'sec-parties', ...svcSec, ...(vehicleCard ? ['sec-vehicle'] : []), ...(handlingVisible ? ['sec-handling'] : []), 'sec-carrier', ...sumSec]
-    : ['sec-consignment', 'sec-parties', 'sec-packages', ...(handlingVisible ? ['sec-handling'] : []), ...svcSec, 'sec-carrier', ...sumSec]
+    ? ['sec-consignment', 'sec-parties', ...svcTypeSec, ...(vehicleCard ? ['sec-vehicle'] : []), ...(hiCard ? ['sec-handling'] : []), ...(vasCard ? ['sec-extras'] : []), ...carrierSec, ...sumSec]
+    : ['sec-consignment', 'sec-parties', 'sec-packages', ...(hiCard ? ['sec-handling'] : []), ...(vasCard ? ['sec-extras'] : []), ...svcTypeSec, ...carrierSec, ...sumSec]
   /* owner, 2026-10-05 ("allow the user to move sections up and down"): the cards follow the saved order (zone
      SECTION_ZONE of the field order, so it is edited, saved, reset and — on Grow — inherited like the fields'); a card
      the order does not know sits after its natural predecessor. The Simplified tier keeps its own order. */
@@ -2606,7 +2784,10 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     'sec-service': done(serviceReq) && done(extrasReq),
     'sec-carrier': done(carrierReq),
     'sec-summary': true,
-    ...(merchantMode ? { 'sec-extras': done(extrasReq), 'sec-service': done(serviceReq), 'sec-vehicle': ftlOk, 'sec-payment': done(paymentReq) } : {}),
+    ...(growLook ? { 'sec-parties': done(fromReq) && done(rtoReq), 'sec-to': done(toReq), 'sec-handling': done(handlingReq) && done(instrReq),
+      'sec-extras': done(vasReq) } : {}),
+    ...(!growLook ? { 'sec-handling': done(handlingReq) && done(instrReq), 'sec-extras': done(vasReq), 'sec-svctype': done(serviceReq) } : {}),
+    ...(merchantMode ? { 'sec-pay': payReq.every(Boolean), 'sec-svctype': done(serviceReq), 'sec-vehicle': ftlOk, 'sec-payment': done(paymentReq) } : {}),
   }
 
   const proceed = () => {
@@ -2624,14 +2805,17 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     /* addresses typed on the form with "Save this address" on are kept now that the consignment is */
     if (anyInline) keepTypedAddresses()
     if (merchantMode) {
-      /* Grow: step 2 (checkout) picks the service and takes the payment, then creates the order */
-      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(buildMerchantDraft()))
-      setDraftSidecar({ pickupId: pr?.id ?? null, overage: fromOverage ? { prId: fromOverage.pr.id, overageId: fromOverage.scan.id } : null })
-      setCheckoutSidecar({
-        services: offered.map((s) => s.code), locked: serviceHidden, layout: layout.services,
-        label: lbl('serviceType'), back: `${pathname}${search}`,
-      })
-      nav('/grow/orders/checkout')
+      /* Grow (owner, 2026-10-27): ONE page — Create Consignment places the order with the service and payment picked here */
+      if (!growQuote) return
+      const placed = placeGrowOrder({ draft: buildMerchantDraft(), chosen: growQuote, parts: pay.choice.parts, merchantCode: merchant?.code ?? null,
+        pickupId: pr?.id ?? null, overage: fromOverage ? { prId: fromOverage.pr.id, overageId: fromOverage.scan.id } : null })
+      pay.remember()
+      const o = placed.order
+      const l = placed.linked
+      if (l.kind === 'overage') toast.success(`Consignment ${o.orderNumber} created for overage ${l.barcode} and linked to ${l.prNumber}`)
+      else if (l.kind === 'pickup') toast.success(`Consignment ${o.orderNumber} created and added to ${l.prNumber}`)
+      else toast.success(`Consignment ${o.orderNumber} created · ${placed.paidNote}${l.kind === 'auto' ? ` · Pickup Request ${l.prNumber} scheduled` : ''}`)
+      nav(l.kind === 'overage' || l.kind === 'pickup' ? `/grow/orders/pickups/${l.prId}` : `/grow/orders?order=${o.id}`)
       return
     }
     if (liveEdit && draftId) {
@@ -2669,6 +2853,24 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const hasCat = (name: string) => categories.includes(name)
   const toggleCategory = (name: string, on: boolean) =>
     setC({ category: on ? [...categories.filter((x) => x !== name), name] : categories.filter((x) => x !== name) })
+  /* owner, 2026-10-28 ("Dedicate Truck moves to the top, Consignment details"): Load type is a Consignment details field */
+  const loadTypeField = merchantMode
+    ? !hid('dedicateTruck') && (
+      <SFld key="loadType" fieldKey="dedicateTruck" label={custom('dedicateTruck', 'Dedicate Truck', 'Load type')}>
+        <SwitchBox icon={Truck} label="Dedicate Truck" checked={mode === 'ftl'} disabled={!!fromOverage || pr?.shipmentType === 'FTL' || truckHidden}
+          onChange={(on) => changeMode(on ? 'ftl' : 'ltl')}
+          title={mode === 'ftl' ? 'Full vehicle (FTL / FCL) — its vehicles are picked in Vehicle Details' : 'Shared vehicle (LTL / LCL) — switch on for a whole vehicle'} />
+      </SFld>
+    )
+    : !isFtl && !hid('dedicateTruck') && (
+      <SFld key="loadType" fieldKey="dedicateTruck" label={custom('dedicateTruck', 'Dedicate Truck', 'Load type')}
+      helper={dedicatedLocked ? `Set by the service — ${serviceLoad === 'ftl' ? 'full' : 'shared'} vehicle only`
+        : dedicated ? (vehicleChoice ? `A whole vehicle · ${vehicleTypeOf(hubVehicles, vehicleChoice)?.name ?? vehicleChoice}`
+          : 'Whole vehicle · picked at planning') : undefined}>
+      <SwitchBox icon={Truck} label="Dedicate Truck" checked={dedicated} disabled={dedicatedLocked || !!fromOverage} onChange={setDedicateTruck}
+        title={dedicated ? 'Full vehicle (FTL / FCL) — a whole vehicle just for this consignment' : 'Shared vehicle (LTL / LCL) — switch on for a whole vehicle'} />
+    </SFld>
+    )
   const consignmentSection = (
     <FormCard id="sec-consignment" title="Consignment details"
       caption={merchantMode ? 'How it is identified, its type, when it ships and how it is paid.' : 'Who it is for, how it is identified, its type, when it ships and how it is paid.'}>
@@ -2683,7 +2885,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
             helper={idPref === 'orderNumber' ? `${lbl('referenceNumber')} is copied from this.` : undefined} />],
           (idPref !== 'orderNumber' || (editing && refHidden && !hid('referenceNumber'))) && ['referenceNumber', <F key="rn" fieldKey="referenceNumber" label={lbl('referenceNumber')} required={refRequired} value={c.referenceNumber ?? ''} placeholder="eg, ABC0001"
             error={err(refRequired && !filled(c.referenceNumber))} onChange={(v) => setC({ referenceNumber: v })}
-            helper={idPref === 'referenceNumber' ? `${lbl('orderNumber')} is copied from this.` : !refRequired ? `Blank = the ${lbl('orderNumber')}` : undefined} />, filled(c.referenceNumber)],
+            helper={idPref === 'referenceNumber' ? `${lbl('orderNumber')} is copied from this.` : undefined} />, filled(c.referenceNumber)],
           !hid('consignmentNumber') && ['consignmentNumber', <F key="cn" fieldKey="consignmentNumber" label={lbl('consignmentNumber')} value={c.consignmentNumber ?? ''} placeholder="eg, 0001"
             onChange={(v) => setC({ consignmentNumber: v })} />, filled(c.consignmentNumber)],
           !hid('consignmentType') && [null, <F key="ct" fieldKey="consignmentType" label={lbl('consignmentType')} required value={ctype}
@@ -2695,14 +2897,16 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
               onChange={(v) => setC({ exchangeOrderNumber: v })} helper={editing ? 'Shown for an Exchange' : 'The order being exchanged'} />, filled(c.exchangeOrderNumber)],
           !merchantMode && !hid('paymentMode') && (typeRule.payment || editing) && ['paymentMode', <F key="pm" fieldKey="paymentMode" label={lbl('paymentMode')} value={c.paymentMode ?? ''} placeholder="eg, Prepaid"
             options={opts(PAYMENT_MODES)} onChange={(v) => setC({ paymentMode: v })} />, !!c.paymentMode],
-          !merchantMode && !hid('orderAmount') && (typeRule.payment || editing) && ['orderAmount', <FNum key="oa" fieldKey="orderAmount" label={c.paymentMode === 'COD' ? 'Amount to collect (COD)' : lbl('orderAmount')} blankZero
+          /* owner, 2026-10-27: Order Amount on the merchant (Grow) form too — the same field, in the same card, with its currency */
+          !hid('orderAmount') && (typeRule.payment || editing) && ['orderAmount', <FNum key="oa" fieldKey="orderAmount"
+            label={!merchantMode && c.paymentMode === 'COD' ? 'Amount to collect (COD)' : lbl('orderAmount')} blankZero
             placeholder="eg, 100.22" unit={merchantMode ? currency : undefined} value={c.orderAmount ?? 0} onChange={(n) => setC({ orderAmount: n || null })} />, (c.orderAmount ?? 0) > 0],
+          loadTypeField && [null, loadTypeField],
           ...customEntries('sec-consignment'),
         ], inMore, secOpen('sec-consignment'))
         return <>
           <SGrid>{r.nodes}</SGrid>
           <RevealToggle open={secOpen('sec-consignment')} onToggle={() => toggleSec('sec-consignment')} waiting={r.waiting} waitingFilled={r.waitingFilled} className="mt-6" />
-          {addFieldLink('sec-consignment')}
         </>
       })()}
     </FormCard>
@@ -2753,6 +2957,8 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     const toBook = role === 'to' ? sourcesOf('to')[0] === 'customers' : role === 'from' ? sourcesOf('from')[0] === 'customers' : false
     /* a name and a street are enough — the address book flags a missing postal code on the row itself */
     if (!filled(p.name) || !filled(p.line1)) { toast.error('Add a name and the address before saving it'); return }
+    /* the builder's Preview never writes anything */
+    if (building) { toast.info('Preview — addresses are not saved'); return }
     if (toBook) { addressBookActions.add({ ...p, windowStart: '', windowEnd: '' }); toast.success(`${p.name} saved to the address book`); return }
     const stored = growOrderActions.addStore({ code: codeFor(p), name: p.businessName || p.name, party: { ...p, windowStart: '', windowEnd: '' } })
     if (role === 'from') setSenderStore(stored.code)
@@ -2914,16 +3120,19 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     const facility = role !== 'rto' && (role === 'from' ? fromEnd.kind === 'facility' : HUB_CODES.has(p.locationCode ?? ''))
     return (
       <div>
-        <SubTitle right={<span className="flex flex-wrap items-center justify-end gap-3">
+        {/* Grow: the card is titled Ship From / Ship To — no second heading inside it */}
+        {(title || right) && <SubTitle right={<span className="flex flex-wrap items-center justify-end gap-3">
           {!merchantMode && role !== 'rto' && (
             <span className="rounded-full bg-warm-100 px-2.5 py-0.5 text-[12px] text-ink-2">
               {src === 'facilities' || facility ? 'Hub' : src === 'customers' ? 'Customer address' : 'Merchant address'}
             </span>
           )}
           {right}
-        </span>}>{title}</SubTitle>
-        {/* Grow has no hubs as addresses — a hub-coded pickup location is one of the merchant's own */}
-        {inlineOf(role) && src !== 'facilities' && (merchantMode || !facility)
+        </span>}>{title}</SubTitle>}
+        {/* owner, 2026-10-28 ("Ship From: Fields ↔ Card does not change the UI"): "Fields on the form" applies to a picked
+            hub too — the search and the fields, filled from the hub. Only an end that can ONLY be a hub (its legs say so) is a
+            hub picker, whatever the choice. */}
+        {inlineOf(role) && src !== 'facilities'
           ? inlineAddress(role, idx)
           : <>
         <div className={`grid gap-x-6 gap-y-4 ${split?.grid ?? ''}`}>
@@ -2943,7 +3152,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
               tag={facility ? 'Saved' : at >= 0 ? book[at].tag ?? 'Saved' : role === 'from' && fromList ? 'Saved' : filled(p.name) ? 'New' : undefined} />
             {editing && src !== 'facilities' && (
               <button type="button" onClick={() => openAddressSetup(role, idx)}
-                className="mt-2 inline-flex items-center gap-1 text-[12px] font-bold text-brand-500 hover:text-brand-600">
+                className="mt-2 inline-flex items-center gap-1 text-[12px] text-ink-3 hover:text-ink">
                 <SlidersHorizontal size={12} />Set up the address fields
               </button>
             )}
@@ -3002,7 +3211,6 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     )
   }
   /* ------------------------------------------------------------ Shipment legs (owner, 2026-09-29) */
-  const hubLabel = (code: string | null | undefined) => (code ? hubName(code, stores) : 'Hub (from the address)')
   const fromWho = typeRule.from === 'customers' ? 'the customer' : 'the merchant'
   const toWho = typeRule.to === 'merchant' ? 'the merchant' : 'the customer'
   const LEG_INFO: Record<LegKind, { name: string; hint: string; rail: string }> = {
@@ -3038,50 +3246,21 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     if (legLh && legLm) add(destHub)
     if (!toIsAddress) add(toEnd.hub)
   }
-  const viaText = legsDirect ? 'One trip, no hub' : legList.length === 0 ? 'No legs yet' : viaHubs.length ? `Via ${viaHubs.join(' → ')}` : ''
-  const pill = (on: boolean, disabled = false) => `inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors
-    ${disabled ? 'cursor-not-allowed opacity-50' : ''} ${on ? 'border-ink bg-warm-50 font-bold text-ink' : 'border-line bg-surface text-ink-2 hover:border-warm-300 hover:text-ink'}`
-  const legHints = [
-    isTransfer && { tone: 'text-ink-3', text: 'A Transfer moves hub to hub — Line Haul only.' },
-    legList.length === 0 && showErrors && { tone: 'text-danger-fg', text: 'Tick at least one leg.' },
-    sameHubBothEnds && { tone: 'text-danger-fg', text: 'Ship From and Ship To are the same hub.' },
-    !legLh && hubsDiffer && { tone: 'text-warning-fg', text: `The ends are served by different hubs (${hubLabel(originHub)} → ${hubLabel(destHub)}) — add Line Haul?` },
-    !isTransfer && legLh && !hubsDiffer && !!originHub && (legFm || legLm) && { tone: 'text-ink-3', text: `Both ends are served by ${hubLabel(originHub)} — Line Haul may not be needed.` },
-  ].filter(Boolean) as { tone: string; text: string }[]
-  /* owner, 2026-09-29: Shipment legs as ONE simple line below the two addresses — four pills (the three legs, or
-     Direct) and, on the right, the hubs it goes through in words */
-  const legsLine = (
-    <div className="mt-6 border-t border-warm-200 pt-4">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-        <span className="mr-2 flex items-center gap-2 text-[13px] font-bold text-ink">
-          Shipment legs<InfoTip text="How it moves. First Mile = pick up and bring to a hub (off: Ship From is a hub). Line Haul = hub to hub. Last Mile = hub to delivery (off: Ship To is a hub). Pick & Del = one trip, no hub." />
-        </span>
-        {(['pickup', 'linehaul', 'delivery'] as const).map((k) => {
-          const on = k === 'pickup' ? legFm : k === 'linehaul' ? legLh : legLm
-          const toggle = () => (legsDirect ? setLegs({ mode: 'hub', ...(k === 'pickup' ? { fm: true } : k === 'delivery' ? { lm: true } : { lh: true }) })
-            : k === 'pickup' ? setLegs({ fm: !legFm }) : k === 'delivery' ? setLegs({ lm: !legLm }) : setLegChoice((x) => ({ ...x, lh: !legLh })))
-          return (
-            <button key={k} type="button" role="checkbox" aria-checked={on} disabled={isTransfer} title={LEG_INFO[k].hint} onClick={toggle} className={pill(on, isTransfer)}>
-              {on && <Check size={13} strokeWidth={3} className="text-brand-500" />}{LEG_INFO[k].name}
-            </button>
-          )
-        })}
-        <span className="px-1 text-[12px] text-ink-3">or</span>
-        <button type="button" role="checkbox" aria-checked={legsDirect} disabled={isTransfer} title="Pick & Del — one trip, no hub; the same rider picks and delivers"
-          onClick={() => setLegs({ mode: legsDirect ? 'hub' : 'direct' })} className={pill(legsDirect, isTransfer)}>
-          {legsDirect && <Check size={13} strokeWidth={3} className="text-brand-500" />}Pick &amp; Del
-        </button>
-        {viaText && (
-          <span className="text-[12px] text-ink-3 lg:ml-auto" aria-label="Legs to be created"
-            title={movementType ? `Saved as ${movementType}${hasPickupLeg(movementType) ? ' — a first-mile pickup request is booked' : ''}` : undefined}>
-            {viaText}
-          </span>
-        )}
-      </div>
-      {legHints.length > 0 && (
-        <p className="mt-2 flex flex-wrap gap-x-4 text-[12px]">{legHints.map((h, i) => <span key={i} className={h.tone}>{h.text}</span>)}</p>
-      )}
-    </div>
+  /* the Hub processing switch's line: the legs it creates, in words, and any problem with the two ends */
+  const legWords = legList.map((k) => LEG_INFO[k].name).join(' → ')
+  /* owner, 2026-10-27 ("simpler term, like the Load type field"): Delivery type · Direct Delivery — off = through a hub,
+     on = one trip, no hub. Like Dedicate Truck, a line only when it is on (or the two ends are the same hub); the legs
+     it creates are the switch's tooltip. One node, on the console (after Load type) and on Grow (beside Dedicate Truck). */
+  const directHelper: ReactNode = sameHubBothEnds ? <span className="text-danger-fg">Ship From and Ship To are the same hub.</span>
+    : legsDirect ? 'One trip, no hub' : undefined
+  const directDeliveryField = (
+    <SFld key="hubProcessing" fieldKey="hubProcessing" label={lbl('hubProcessing')} helper={directHelper}>
+      <SwitchBox icon={RouteIcon} label="Direct Delivery" checked={legsDirect} disabled={isTransfer}
+        onChange={(on) => setLegs({ mode: on ? 'direct' : 'hub', fm: null, lm: null, lh: null })}
+        title={isTransfer ? 'A Transfer always moves hub to hub'
+          : legsDirect ? 'Direct Delivery — one trip, no hub: the same rider picks up and delivers'
+          : `Through a hub${legWords ? ` — ${legWords}` : ''}${viaHubs.length ? ` · via ${viaHubs.join(' → ')}` : ''} (switch on for one trip, no hub)`} />
+    </SFld>
   )
   const addressModal = (
     <>
@@ -3106,7 +3285,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
               variant={addr.role === 'rto' ? 'rto' : 'full'} />
             {/* any address typed here can be kept — Ship From and Ship To alike */}
             {!addr.setup && (addr.isNew || valueOf(addr.role === 'rto' ? 'from' : addr.role, partyOf(addr.role, addr.idx)) === '') && (
-              <div className="mt-7 flex items-center gap-3 rounded-lg bg-warm-50 px-4 py-3">
+              <div className="mt-5 flex items-center gap-3 rounded-lg bg-warm-50 px-4 py-3">
                 <Bookmark size={16} className="shrink-0 text-ink-3" />
                 <div className="min-w-0 flex-1">
                   <p className="text-[13px] font-bold text-ink">Save this address</p>
@@ -3137,7 +3316,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       <div className="mb-2 flex items-center gap-3">
         <span className="text-[14px] font-bold text-ink">
           Pickup window{askWindow || need('addrWindow')
-            ? <span className="text-danger-fg">&nbsp;*</span>
+            ? <span className="req-star">*</span>
             : <span className="ml-1.5 text-[13px] font-normal text-ink-3" title="Leave it empty to book the pickup later from Shipments">· Optional</span>}
         </span>
         {pickupState === 'manual' && hasWindow && !need('addrWindow') && (
@@ -3156,21 +3335,21 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     </div>
   ) : null
   const fromSide = <>
-    {addressSlot('from', 0, 'Ship From')}
+    {addressSlot('from', 0, merchantMode ? null : 'Ship From')}
     {/* Grow's pickup window keeps to the left half when the ends are one under the other */}
     <div className={merchantMode && stackAddr ? '@min-[600px]:w-1/2 @min-[600px]:pr-3' : ''}>{merchantMode ? merchantPickupWindow : windowCells('from', 0)}</div>
     {typeRule.rto && (
-      <div className="mt-6">
+      <div className="mt-4">
         <InlineSwitch label="RTO address same as Ship From address" title="If it can't be delivered, it comes back to the Ship From address"
           checked={(c.rtoMode ?? RTO_MODES[0]) === RTO_MODES[0]} onChange={(same) => setC({ rtoMode: same ? RTO_MODES[0] : RTO_MODES[1] })} />
       </div>
     )}
-    {typeRule.rto && c.rtoMode === RTO_MODES[1] && <div className="mt-7">{addressSlot('rto', 0, 'Return To Origin (RTO) address')}</div>}
+    {typeRule.rto && c.rtoMode === RTO_MODES[1] && <div className="mt-5">{addressSlot('rto', 0, 'Return To Origin (RTO) address')}</div>}
   </>
   const toSide = <>
     {allDrops.map((_, i) => (
-      <div key={i} className={i > 0 ? 'mt-8 border-t border-warm-200 pt-6' : ''}>
-        {addressSlot('to', i, allDrops.length > 1 ? `Ship To · Address ${i + 1}` : 'Ship To', i > 0 ? (
+      <div key={i} className={i > 0 ? 'mt-6 border-t border-warm-200 pt-5' : ''}>
+        {addressSlot('to', i, allDrops.length > 1 ? `Ship To · Address ${i + 1}` : merchantMode ? null : 'Ship To', i > 0 ? (
           <Tip text="Remove this address"><button type="button" aria-label={`Remove address ${i + 1}`} onClick={() => removeDrop(i - 1)}
             className="text-ink-3 transition-colors hover:text-brand-500"><CircleMinus size={16} /></button></Tip>
         ) : undefined)}
@@ -3179,42 +3358,55 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     ))}
     {/* scheduling is about the DELIVERY — asked beside its window */}
     {!hid('schedulingConfirmation') && (
-      <div className="mt-6"><Configurable fieldKey="schedulingConfirmation">
+      <div className="mt-4"><Configurable fieldKey="schedulingConfirmation">
         <InlineSwitch label={lbl('schedulingConfirmation')} title={SWITCH_HINTS.schedulingConfirmation} checked={!!c.schedulingConfirmation} onChange={(v) => setC({ schedulingConfirmation: v })} />
       </Configurable></div>
     )}
     {/* multi-drop is a dedicated-truck booking: every address needs a vehicle */}
     {(isFtl || (merchantMode && mode === 'ftl')) && <div className="mt-6"><AddMoreButton label="Add delivery address" onClick={() => setDrops((ds) => [...ds, blankParty()])} /></div>}
   </>
-  /* while the form is edited: how the addresses are shown — card choices (owner, 2026-10-06) */
-  const consoleLayout = growSetup && editing ? loadLayout('console') : null
-  const addressLayoutPanel = editing && (
-    <div className="mb-6 rounded-lg border border-dashed border-warm-300 p-4">
-      <p className="mb-3 text-[13px] font-bold text-ink">How addresses are shown <span className="font-normal text-ink-3">— the same on every consignment</span></p>
-      {/* ONE row (owner, 2026-10-07: "in the form builder can it be in one row"): Layout · Ship From · Ship To · RTO address, wrapping
-          only when the card is too narrow for them all */}
-      <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
-        {ADDRESS_LAYOUT_ROWS.map((row) => (
-          <div key={row.key} className="flex items-center gap-2.5">
-            <span className="flex shrink-0 items-center gap-1.5 text-[13px] text-ink-2">
-              {row.label}
-              {consoleLayout && draftLayout[row.key] !== consoleLayout[row.key] && (
-                <Tip text="Changed for merchants — the operations form differs"><span className={`${CHIP} bg-brand-50 font-bold text-brand-600`}>Merchant</span></Tip>
-              )}
-            </span>
-            <LayoutSeg label="" value={draftLayout[row.key]}
-              onChange={(v) => setDraftLayout((l) => ({ ...l, [row.key]: v }) as FormLayout)}
-              options={row.options.map((o) => ({ value: o.value, label: o.label, tip: o.sub }))} />
-          </div>
-        ))}
-      </div>
+  /* while the form is edited: how the addresses are shown — card choices (owner, 2026-10-06), each form its own */
+  /** the header button that opens a card's display options while the form is edited */
+  const optsButton = (id: string, label: string) => (
+    <button type="button" aria-expanded={cardOpts === id} onClick={() => setCardOpts((o) => (o === id ? null : id))}
+      className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[12px] transition-colors
+        ${cardOpts === id ? 'border-brand-200 bg-brand-50 text-brand-600' : 'border-line bg-surface text-ink-2 hover:bg-warm-50 hover:text-ink'}`}>
+      <SlidersHorizontal size={12} />{label}{cardOpts === id ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+    </button>
+  )
+  /* owner, 2026-10-28 ("simplify it, its effect visible in real time"): ONE row — Layout · Ship From · Ship To · RTO — and a
+     choice changes the form underneath at once. Both forms use the same components now, so it sets both forms' display. */
+  const addressLayoutPanel = editing && cardOpts === 'parties' && (
+    <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg bg-warm-50 px-4 py-3">
+      {ADDRESS_LAYOUT_ROWS.map((row) => (
+        <div key={row.key} className="flex items-center gap-2">
+          <span className="shrink-0 text-[13px] text-ink-2">{row.label}</span>
+          <LayoutSeg label="" value={draft.layout.console[row.key]}
+            onChange={(v) => { for (const p of ['console', 'grow'] as const) setLayoutOf(p, (l) => ({ ...l, [row.key]: v }) as FormLayout) }}
+            options={row.options.map((o) => ({ value: o.value, label: o.label, tip: o.sub }))} />
+        </div>
+      ))}
     </div>
   )
-  const partiesSection = (
-    <FormCard id="sec-parties" title="Ship From → Ship To"
+  /* Grow (owner, 2026-10-27, the Grow team's form): Ship From and Ship To are two cards, each the full width — the picker
+     on the left and the saved card on the right, or the fields four across */
+  const merchantToSection = (
+    <FormCard id="sec-to" title="Ship To" caption={anyInline ? 'Search a saved address, or type the address here.' : 'Pick a saved address or add a new one.'}>
+      <div className="@container">{toSide}</div>
+    </FormCard>
+  )
+  const partiesSection = growLook ? (
+    <FormCard id="sec-parties" title="Ship From" action={editing ? optsButton('parties', 'Address display') : undefined}
+      caption={anyInline ? 'Search a saved address, or type the address here.' : 'Pick a saved address or add a new one.'}>
+      {addressLayoutPanel}
+      <div className="@container">{fromSide}</div>
+      {addressModal}
+    </FormCard>
+  ) : (
+    <FormCard id="sec-parties" title="Ship From → Ship To" action={editing ? optsButton('parties', 'Address display') : undefined}
       caption={ctype === 'Transfer' ? 'Stock moving between two facilities — pick a hub at each end.'
         : anyInline ? 'Search a saved address, or type the address here.'
-        : merchantMode ? 'Pick a saved address or add a new one.' : 'Pick a saved address or add a new one — Shipment legs decide whether each end is an address or a hub.'}>
+        : merchantMode ? 'Pick a saved address or add a new one.' : 'Pick a saved address or add a new one — a hub or a customer address.'}>
       {addressLayoutPanel}
       {/* owner, 2026-10-06: Ship From | Ship To, one beside the other, however the addresses are entered (the second
           branch's combined card) — a container query, so they stack only when the CARD is narrow (the Summary beside the
@@ -3224,17 +3416,17 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           ? (
             <div>
               <div className="min-w-0">{fromSide}</div>
-              <div className="mt-10 min-w-0 border-t border-warm-200 pt-8">{toSide}</div>
+              <div className="mt-6 min-w-0 border-t border-warm-200 pt-5">{toSide}</div>
             </div>
           )
           : (
             <div className="grid gap-y-10 @min-[720px]:grid-cols-2">
               <div className="min-w-0 @min-[720px]:pr-8">{fromSide}</div>
-              <div className="min-w-0 border-t border-warm-200 pt-8 @min-[720px]:border-l @min-[720px]:border-t-0 @min-[720px]:pl-8 @min-[720px]:pt-0">{toSide}</div>
+              <div className="min-w-0 border-t border-warm-200 pt-5 @min-[720px]:border-l @min-[720px]:border-t-0 @min-[720px]:pl-8 @min-[720px]:pt-0">{toSide}</div>
             </div>
           )}
       </div>
-      {!merchantMode && legsLine}
+      {/* owner, 2026-10-27: no Shipment legs line here — how it moves is the Hub processing switch in Service & instructions */}
       {addressModal}
     </FormCard>
   )
@@ -3267,42 +3459,38 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
         }), () => false, true, 'chips').nodes}
       </div>}
       {/* row 2 — how the boxes travel, and their tags; every control on one baseline */}
-      {switchesRow && <div className={`${handlingChipsVisible ? 'mt-6' : ''} ${HANDLING_ROW}`}>
+      {/* owner, 2026-10-28 ("make every toggle like the Delivery type field"): each switch is a field — its name above, a switch
+          box with an icon below — in the field grid, Tags beside them */}
+      {switchesRow && <div className={handlingChipsVisible ? 'mt-6' : ''}><SGrid>
         {arrange(sortApi, 'handling-switches', [
+          /* owner, 2026-10-28: the Task type (Direct Delivery — was "Delivery type") sits with the other switches */
+          !hid('hubProcessing') && [null, <Fragment key="hubProcessing">{directDeliveryField}</Fragment>],
           !hid('scannable') && [null, (
-            <Configurable key="scannable" fieldKey="scannable">
-              <InlineSwitch label={custom('scannable', 'Scannable', 'Barcode on every box')}
-                title={barcodeEach || (!isFtl && !useItems) ? `${SWITCH_HINTS.scannable} On = every package line is one box; its quantity stays 1.` : SWITCH_HINTS.scannable}
-                checked={!!c.scannable} onChange={setBarcodeAll} />
-            </Configurable>
+            <SFld key="scannable" fieldKey="scannable" label={custom('scannable', 'Scannable', 'Barcode labels')}>
+              <SwitchBox icon={ScanBarcode} label="Barcode on every box" checked={!!c.scannable} onChange={setBarcodeAll}
+                title={barcodeEach || (!isFtl && !useItems) ? `${SWITCH_HINTS.scannable} On = every package line is one box; its quantity stays 1.` : SWITCH_HINTS.scannable} />
+            </SFld>
           )],
           !hid('splittable') && [null, (
-            <Configurable key="splittable" fieldKey="splittable">
-              <InlineSwitch label="Can be delivered in parts" title={SWITCH_HINTS.splittable}
-                checked={!!c.splittable} onChange={(v) => setC({ splittable: v })} />
-            </Configurable>
+            <SFld key="splittable" fieldKey="splittable" label="Delivery in parts">
+              <SwitchBox icon={Split} label="Can be split" checked={!!c.splittable} onChange={(v) => setC({ splittable: v })} title={SWITCH_HINTS.splittable} />
+            </SFld>
           )],
           !hid('clearanceRequired') && [null, (
-            <Configurable key="clearanceRequired" fieldKey="clearanceRequired">
-              <InlineSwitch label={lbl('clearanceRequired')} title={SWITCH_HINTS.clearanceRequired}
-                checked={!!c.clearanceRequired} onChange={(v) => setC({ clearanceRequired: v })} />
-            </Configurable>
+            <SFld key="clearanceRequired" fieldKey="clearanceRequired" label={lbl('clearanceRequired')}>
+              <SwitchBox icon={ShieldCheck} label="Needs clearance" checked={!!c.clearanceRequired} onChange={(v) => setC({ clearanceRequired: v })} title={SWITCH_HINTS.clearanceRequired} />
+            </SFld>
           )],
           !hid('tags') && [null, (
-            <Configurable key="tags" fieldKey="tags">
-              <div className="flex items-center gap-2.5">
-                <span className="text-[13px] text-ink">{lbl('tags')}{need('tags') && <span className="text-danger-fg">&nbsp;*</span>}</span>
-                <div className="w-56">
-                  <MultiSelectDropdown size="sm" options={TAG_OPTIONS} values={c.tags ?? []} noun="tags" placeholder="Add tags" onChange={(v) => setC({ tags: v })} />
-                </div>
-              </div>
-            </Configurable>
+            <SFld key="tags" fieldKey="tags" label={lbl('tags')} required={need('tags')}>
+              <MultiSelectDropdown options={TAG_OPTIONS} values={c.tags ?? []} noun="tags" placeholder="Add tags" onChange={(v) => setC({ tags: v })} />
+            </SFld>
           )],
         ], () => false, true).nodes}
-      </div>}
+      </SGrid></div>}
       {/* Grow (owner, 2026-10-06: "Tags and Dedicate Truck in one line"): the two as fields side by side, labels on top,
           the field grid's widths — Load type = the Dedicate Truck switch (on = a full vehicle, picked in Vehicle Details) */}
-      {merchantMode && !hid('dedicateTruck') && (
+      {growLook && (!hid('dedicateTruck') || !hid('hubProcessing')) && (
         <div className={`${handlingChipsVisible || switchesRow ? 'mt-6' : ''} grid grid-cols-1 ${FIELD_GAPS} sm:grid-cols-[repeat(auto-fill,minmax(220px,1fr))]`}>
           {/* 2026-10-07: a builder field on Grow too — hidden, every order books the builder's default (shared unless set) */}
           {!hid('dedicateTruck') && (
@@ -3312,13 +3500,14 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
                 title={mode === 'ftl' ? 'Full vehicle (FTL / FCL) — its vehicles are picked in Vehicle Details' : 'Shared vehicle (LTL / LCL) — switch on for a whole vehicle'} />
             </SFld>
           )}
+          {/* owner, 2026-10-27: Delivery type on Grow too, beside Load type */}
+          {!hid('hubProcessing') && directDeliveryField}
         </div>
       )}
       {need('tags') && !(c.tags ?? []).length && showErrors && <ErrLine className="mt-2">Add at least one tag.</ErrLine>}
     </div>
     {handlingCustom.nodes.length > 0 && <SGrid className={handlingChipsVisible || handlingTogglesVisible ? 'mt-6' : ''}>{handlingCustom.nodes}</SGrid>}
     <RevealToggle open={secOpen('sec-handling')} onToggle={() => toggleSec('sec-handling')} waiting={handlingCustom.waiting} waitingFilled={handlingCustom.waitingFilled} className="mt-6" />
-    {addFieldLink('sec-handling')}
     </>
     </FormCard>
   )
@@ -3338,33 +3527,59 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const SKU_INLINE_ORDER = ['skuCategory', 'skuDescription', 'skuHsn', 'skuOrigin', 'skuUnitCost', 'skuImage'] as const
   const SKU_INLINE_W: Record<string, string> = { skuCategory: 'minmax(0,1fr)', skuDescription: 'minmax(0,1.2fr)', skuHsn: '112px', skuOrigin: 'minmax(0,1.1fr)', skuUnitCost: '112px', skuImage: 'minmax(0,1fr)' }
   const skuInline: string[] = SKU_INLINE_ORDER.filter((k) => !hid(k) && !inMore(k))
-  const skuInlineLabel = (k: string) => (k === 'skuUnitCost' ? `${lbl(k)} (${currency})` : lbl(k))
+  /* Grow (owner, 2026-10-27, the Grow team's form): the short headers — Qty, Cost — unless the builder renamed them */
+  const skuInlineLabel = (k: string) => (k === 'skuUnitCost' ? (growLook ? ownLbl(k, 'Cost') : `${lbl(k)} (${currency})`)
+    : growLook && k === 'skuDescription' ? ownLbl(k, 'Description') : lbl(k))
   const SKU_COLS = 'grid items-start gap-x-3'
-  const skuColsStyle = { gridTemplateColumns: ['28px', 'minmax(0,1.3fr)', 'minmax(0,1.4fr)', '84px', ...(skuWHid ? [] : ['104px']),
-    ...(skuDHid ? [] : ['minmax(0,1.5fr)']), ...skuInline.map((k) => SKU_INLINE_W[k]), '80px', '96px'].join(' ') }
-  const skuMinWidth = 860 + skuInline.length * 130
+  /** a SKU line's default widths (3 units a field): Name wider, Quantity narrow */
+  const SKU_LINE_W: Record<string, FieldWidth> = { skuNameCol: 'l', skuQtyCol: 's' }
+  /** a SKU column's width by the builder (owner, 2026-10-28): S about half · M its own · L about double · Full wider still */
+  const skuColW = (k: string, base: string) => {
+    const w = rules[k]?.width
+    if (!w || w === 'm') return base
+    /* S is about three quarters of M, never below a usable floor (owner, 2026-10-28: "see the difference between S and M") */
+    if (k === 'skuDimensions') return w === 's' ? 'minmax(150px,1.1fr)' : w === 'l' ? 'minmax(220px,2.4fr)' : 'minmax(260px,3.2fr)'
+    const px = /^(\d+)px$/.exec(base)
+    if (px) return `${Math.max(80, Math.round(Number(px[1]) * (w === 's' ? 0.75 : w === 'l' ? 1.8 : 2.4)))}px`
+    return w === 's' ? 'minmax(96px,1fr)' : w === 'l' ? 'minmax(0,2.4fr)' : 'minmax(0,3.2fr)'
+  }
+  /* Grow: SKU Code · Name · Qty · Description · HSN Code · Origin Country · Cost · L × W × H · Weight — no # and no Total */
+  /* owner, 2026-10-28 ("I cannot rearrange the SKU fields and change their sizes"): the SKU line's own columns (Unit Weight,
+     Dimensions and every detail shown on the line) follow the field order — drag a header while the form is edited (zone
+     `sku-cols`) — and each takes the builder's Width (S / M / L / Full, `skuColW`). SKU Code · Name · Quantity stay first. */
+  const SKU_COL_BASE: Record<string, string> = { skuCodeCol: 'minmax(0,1.3fr)', skuNameCol: 'minmax(0,1.4fr)', skuQtyCol: '84px', skuWeight: '104px', skuDimensions: 'minmax(0,1.5fr)', ...SKU_INLINE_W }
+  /* owner, 2026-10-28: SKU Code · Name · Quantity move too (always shown — required) */
+  const skuVarCols = applyOrder(['skuCodeCol', 'skuNameCol', 'skuQtyCol', ...(skuWHid ? [] : ['skuWeight']), ...(skuDHid ? [] : ['skuDimensions']), ...skuInline],
+    (x) => x, fieldOrder['sku-cols'])
+  const skuColsStyle = { gridTemplateColumns: (growLook
+    ? ['minmax(0,1.2fr)', 'minmax(0,1.3fr)', '60px', ...skuInline.map((k) => (k === 'skuUnitCost' ? '92px' : 'minmax(0,1fr)')),
+      ...(skuDHid ? [] : ['132px']), ...(skuWHid ? [] : ['88px']), 'max-content']
+    : ['28px', ...skuVarCols.map((k) => skuColW(k, SKU_COL_BASE[k])), '80px', '96px']).join(' ') }
+  const skuMinWidth = growLook ? 600 + skuInline.length * 90 : 860 + skuInline.length * 130
   /** picked from the SKU master (its name / size / weight came with it) vs typed by hand */
   const isMasterSku = (it: ParcelItem) => !!it.skuCode && masters.skus.some((sk) => sk.code === it.skuCode)
   /** a SKU line's details (owner, 2026-10-06: "Grow — HSN Code, Origin Country and Cost in the default view"): the ones not
       under "More" sit on the line's second row (Grow: HSN · Origin · Cost; the console: none); the rest wait behind the
       chevron at the line's end and open IN PLACE. `open` = the chevron is open (or the form is edited). */
-  const skuDetails = (it: ParcelItem, patch: (p: Partial<ParcelItem>) => void, open: boolean, skipInline = false) => {
-    const off = (k: string) => hid(k) || (skipInline && skuInline.includes(k))
-    const r = arrange(sortApi, 'sku-details', [
-      !off('skuCategory') && ['skuCategory', <F key="category" fieldKey="skuCategory" label={lbl('skuCategory')} value={it.category ?? ''}
+  /** a SKU's detail fields (Category, Description, HSN, Origin, Unit Cost, Image) — the details grid and the SKU line share them */
+  const skuDetailEntries = (it: ParcelItem, patch: (p: Partial<ParcelItem>) => void, off: (k: string) => boolean): RevealEntry[] => [
+      !off('skuCategory') && ['skuCategory', <F key="skuCategory" fieldKey="skuCategory" label={lbl('skuCategory')} value={it.category ?? ''}
         options={opts([...new Set([...masters.skus.map((sk) => sk.category).filter(Boolean), ...(it.category ? [it.category] : [])])])}
         onChange={(v) => patch({ category: v })} />, filled(it.category)],
-      !off('skuDescription') && ['skuDescription', <F key="description" fieldKey="skuDescription" label={lbl('skuDescription')} value={it.description ?? ''}
+      !off('skuDescription') && ['skuDescription', <F key="skuDescription" fieldKey="skuDescription" label={lbl('skuDescription')} value={it.description ?? ''}
         placeholder="eg, Water Bottle" onChange={(v) => patch({ description: v })} />, filled(it.description)],
-      !off('skuHsn') && ['skuHsn', <F key="hsn" fieldKey="skuHsn" label={lbl('skuHsn')} value={it.hsnCode ?? ''} placeholder="eg, 851713"
+      !off('skuHsn') && ['skuHsn', <F key="skuHsn" fieldKey="skuHsn" label={lbl('skuHsn')} value={it.hsnCode ?? ''} placeholder="eg, 851713"
         onChange={(v) => patch({ hsnCode: v })} />, filled(it.hsnCode)],
-      !off('skuOrigin') && ['skuOrigin', <F key="origin" fieldKey="skuOrigin" label={lbl('skuOrigin')} value={it.originCountry ?? ''} placeholder="eg, Philippines" searchable
+      !off('skuOrigin') && ['skuOrigin', <F key="skuOrigin" fieldKey="skuOrigin" label={lbl('skuOrigin')} value={it.originCountry ?? ''} placeholder="eg, Philippines" searchable
         options={opts([...new Set([...COUNTRIES, ...(it.originCountry ? [it.originCountry] : [])])])} onChange={(v) => patch({ originCountry: v })} />, filled(it.originCountry)],
-      !off('skuUnitCost') && ['skuUnitCost', <FNum key="cost" fieldKey="skuUnitCost" label={`${lbl('skuUnitCost')} (${currency})`} blankZero placeholder="eg, 12.34"
+      !off('skuUnitCost') && ['skuUnitCost', <FNum key="skuUnitCost" fieldKey="skuUnitCost" label={`${lbl('skuUnitCost')} (${currency})`} blankZero placeholder="eg, 12.34"
         value={it.unitCost ?? 0} onChange={(n) => patch({ unitCost: n })} />, (it.unitCost ?? 0) > 0],
-      !off('skuImage') && ['skuImage', <F key="image" fieldKey="skuImage" label={lbl('skuImage')} value={it.imageUrl ?? ''}
+      !off('skuImage') && ['skuImage', <F key="skuImage" fieldKey="skuImage" label={lbl('skuImage')} value={it.imageUrl ?? ''}
         onChange={(v) => patch({ imageUrl: v })} />, filled(it.imageUrl)],
-    ], inMore, open)
+  ]
+  const skuDetails = (it: ParcelItem, patch: (p: Partial<ParcelItem>) => void, open: boolean, skipInline = false) => {
+    const off = (k: string) => hid(k) || (skipInline && skuInline.includes(k))
+    const r = arrange(sortApi, 'sku-details', skuDetailEntries(it, patch, off), inMore, open)
     return { node: r.nodes.length ? <SGrid className="mt-5 pl-10">{r.nodes}</SGrid> : null, waiting: r.waiting, waitingFilled: r.waitingFilled }
   }
   /** one inline detail as a bare control (its header names it) — same inputs as the details grid */
@@ -3399,20 +3614,24 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
      the SKU master and are asked only when the master has none; shown and typed in the list's units. */
   const iu = unitsOf(itemUnit)
   const ITEM_COLS = 'grid items-start gap-x-4'
-  const itemColsStyle = { gridTemplateColumns: ['28px', 'minmax(0,2.2fr)', '112px', 'minmax(0,1.9fr)', ...skuInline.map((k) => SKU_INLINE_W[k]), '96px', '104px'].join(' ') }
+  /* the SKU-only table's own columns follow the same order (zone `sku-cols`) and widths as the package SKU table */
+  const itemInline = applyOrder(skuInline, (x) => x, fieldOrder['sku-cols'])
+  const itemColsStyle = { gridTemplateColumns: ['28px', 'minmax(0,2.2fr)', '112px', 'minmax(0,1.9fr)', ...itemInline.map((k) => skuColW(k, SKU_INLINE_W[k])), '96px', '104px'].join(' ') }
   const itemTotals = itemParcels.reduce((t, p) => ({
     pieces: t.pieces + p.quantity, kg: t.kg + p.weight * p.quantity, cm3: t.cm3 + p.l * p.w * p.h * p.quantity,
   }), { pieces: 0, kg: 0, cm3: 0 })
   const itemsBlock = (
     <div>
       <div className="overflow-x-auto">
-        <div style={{ minWidth: 760 + skuInline.length * 130 }}>
-          <div className={`${ITEM_COLS} border-b border-warm-200 pb-2 text-[13px] text-ink-2`} style={itemColsStyle}>
+        <div style={{ minWidth: 760 + itemInline.length * 130 }}>
+          <div className={`${ITEM_COLS} border-b border-warm-200 pb-2 field-label`} style={itemColsStyle}>
             <span>#</span>
-            <span>SKU<span className="text-danger-fg"> *</span></span>
-            <span>Quantity<span className="text-danger-fg"> *</span></span>
+            <span>SKU<span className="req-star">*</span></span>
+            <span>Quantity<span className="req-star">*</span></span>
             <span>Each unit</span>
-            {skuInline.map((k) => <Configurable key={k} fieldKey={k}><span className="block truncate" title={skuInlineLabel(k)}>{skuInlineLabel(k)}</span></Configurable>)}
+            {arrange(sortApi, 'sku-cols', itemInline.map((k): RevealEntry => [null, (
+              <Configurable key={k} fieldKey={k}><span className="block break-words" title={skuInlineLabel(k)}>{skuInlineLabel(k)}</span></Configurable>
+            )]), () => false, true).nodes}
             <span className="text-right">Total</span>
             <span />
           </div>
@@ -3426,7 +3645,8 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
             const askD = !skuDHid && !dimsOk
             /* a typed SKU has nothing from the master — its details start open */
             const open = itemMore.has(l.id) !== (picked && !isMasterSku(it))
-            const det = picked ? skuDetails(it, (patch) => setLine(l.id, patch), open || editing, true) : null
+            /* while the form is edited the details show on the empty sample line too — so they can be picked, moved and sized */
+            const det = picked || editing ? skuDetails(it, (patch) => setLine(l.id, patch), open || editing, true) : null
             return (
               <div key={l.id} className="border-b border-warm-200 py-3 last:border-0">
               <div className={ITEM_COLS} style={itemColsStyle}>
@@ -3459,7 +3679,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
                         </div>
                       )}
                 </div>
-                {skuInline.map((k) => <div key={k} className="min-w-0">{picked ? skuInlineCell(k, it, (patch) => setLine(l.id, patch)) : null}</div>)}
+                {itemInline.map((k) => <div key={k} className="min-w-0">{picked || editing ? skuInlineCell(k, it, (patch) => setLine(l.id, patch)) : null}</div>)}
                 <span className="flex h-8 items-center justify-end text-[13px] tabular-nums text-ink">
                   {picked && weightOk && it.quantity ? `${round2(iu.toW(it.weightKg * it.quantity))} ${iu.w}` : '-'}
                 </span>
@@ -3491,28 +3711,31 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   /* ---- Package & SKU (owner, 2026-09-29; 2026-10-06: no "How goods are entered" — the builder hides the SKUs or the
      packages instead): each package with its SKUs, and every Add button BELOW what it adds to — Add SKU under its SKUs,
      Add Package under all the packages. A package's units (kg + cm or lb + in) sit in its header; its SKUs follow. */
-  const skuTable = (rows: ReactNode, u: Units) => (
-    <div className="overflow-x-auto">
+  const skuTable = (rows: ReactNode, u: Units) => growLook ? (
+    /* Grow (owner, 2026-10-27, the Grow team's form): a framed table, its header on a grey band */
+    <div className="overflow-x-auto rounded-lg border border-warm-200">
       <div style={{ minWidth: skuMinWidth }}>
-        <div className={`${SKU_COLS} border-b border-warm-200 pb-2 text-[13px] text-ink-2`} style={skuColsStyle}>
-          <span>#</span>
-          <span>SKU Code<span className="text-danger-fg"> *</span></span>
-          <span>Name<span className="text-danger-fg"> *</span></span>
-          <span>Quantity<span className="text-danger-fg"> *</span></span>
-          {!skuWHid && <Configurable fieldKey="skuWeight"><span>{ownLbl('skuWeight', 'Unit Weight')}{need('skuWeight') && <span className="text-danger-fg"> *</span>}</span></Configurable>}
-          {!skuDHid && <Configurable fieldKey="skuDimensions"><span>{ownLbl('skuDimensions', 'Dimensions')} ({u.d}){need('skuDimensions') && <span className="text-danger-fg"> *</span>}</span></Configurable>}
-          {skuInline.map((k) => <Configurable key={k} fieldKey={k}><span className="block truncate" title={skuInlineLabel(k)}>{skuInlineLabel(k)}</span></Configurable>)}
-          <span className="text-right">Total</span>
+        <div className={`${SKU_COLS} border-b border-warm-200 bg-warm-50 px-4 py-2.5 field-label`} style={skuColsStyle}>
+          <span>SKU Code<span className="req-star">*</span></span>
+          <span>Name<span className="req-star">*</span></span>
+          <span>Qty<span className="req-star">*</span></span>
+          {skuInline.map((k) => <Configurable key={k} fieldKey={k}><span className="block break-words" title={skuInlineLabel(k)}>{skuInlineLabel(k)}</span></Configurable>)}
+          {!skuDHid && <Configurable fieldKey="skuDimensions"><span className="block break-words">L × W × H ({u.d}){need('skuDimensions') && <span className="req-star">*</span>}</span></Configurable>}
+          {!skuWHid && <Configurable fieldKey="skuWeight"><span className="block break-words">{ownLbl('skuWeight', 'Weight')} ({u.w}){need('skuWeight') && <span className="req-star">*</span>}</span></Configurable>}
           <span />
         </div>
-        {rows}
+        <div className="px-4">{rows}</div>
       </div>
     </div>
+  ) : (
+    /* each SKU line carries its own field names (owner, 2026-10-28) — no shared header */
+    <div className="grid gap-3">{rows}</div>
   )
   /** one SKU line — code (master or typed) · name · quantity · unit weight · L × W × H · total · details, in its package's
       units. `preview` = the builder's SAMPLE line (owner, 2026-10-05: "one should be shown, otherwise I have to click Add
       before I can configure them"): every column and the details show, and nothing is written. */
   const skuRow = (it: ParcelItem, i: number, k: number, n: number, preview = false) => {
+    const k2 = k
     const key = preview ? `sample:${i}` : `${i}:${k}`
     const u = unitsOf(parcels[i])
     const upd = (patch: Partial<ParcelItem>) => { if (!preview) setItem(i, k, patch) }
@@ -3523,6 +3746,55 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       need('skuDimensions') && !((it.lengthCm ?? 0) > 0 && (it.widthCm ?? 0) > 0 && (it.heightCm ?? 0) > 0) && 'dimensions']
       .filter(Boolean) as string[]
     const vol = (it.lengthCm ?? 0) * (it.widthCm ?? 0) * (it.heightCm ?? 0)
+    /* owner, 2026-10-28 ("can't edit the SKUs where packages and SKUs are both on — make it more like the package fields"): a SKU
+       line is a field row like a package's — every field with its name above it, in one zone (`sku-line`): drag to move, S / M / L /
+       Full, show for Ops / Grow, Required, More. SKU Code · Name · Quantity are always asked. */
+    if (!growLook) {
+      const ln = arrange(sortApi, 'sku-line', [
+        [null, <SFld key="skuCodeCol" label="SKU Code" required>
+          <SkuCode item={it} skus={masters.skus} onPick={(sk) => { if (!preview) pickSku(i, k, sk) }} onUnlink={() => upd({ skuCode: null })}
+            onCustom={(code) => upd({ skuCode: code })} autoFocus={!preview && focusLine?.i === i && focusLine.k === k} />
+        </SFld>],
+        [null, <SFld key="skuNameCol" label="Name" required>
+          <Input value={it.name} placeholder="eg, Refrigerator 300 L" disabled={isMasterSku(it)} onChange={(v) => upd({ name: v })} />
+        </SFld>],
+        [null, <SFld key="skuQtyCol" label="Quantity" required>
+          <NumBox integer min={1} blankZero placeholder="1" value={it.quantity} error={err(it.quantity < 1)} onChange={(q) => upd({ quantity: q })} />
+        </SFld>],
+        !hid('skuWeight') && ['skuWeight', <SFld key="skuWeight" fieldKey="skuWeight" label={ownLbl('skuWeight', 'Unit Weight')} required={need('skuWeight')}>
+          <NumBox unit={u.w} blankZero placeholder="0" value={u.toW(it.weightKg)} precision={u.precision} error={err(need('skuWeight') && !(it.weightKg > 0))}
+            onChange={(w) => upd({ weightKg: u.fromW(w) })} />
+        </SFld>, it.weightKg > 0],
+        !hid('skuDimensions') && ['skuDimensions', <SFld key="skuDimensions" fieldKey="skuDimensions" label={`${ownLbl('skuDimensions', 'Dimensions')} (${u.d})`} required={need('skuDimensions')}>
+          <DimsBox units={u} l={it.lengthCm ?? 0} w={it.widthCm ?? 0} h={it.heightCm ?? 0} error={need('skuDimensions')}
+            onChange={(d) => upd({ ...(d.l !== undefined ? { lengthCm: d.l } : {}), ...(d.w !== undefined ? { widthCm: d.w } : {}), ...(d.h !== undefined ? { heightCm: d.h } : {}) })} />
+        </SFld>, vol > 0],
+        ...skuDetailEntries(it, upd, hid),
+      ], inMore, open || editing, undefined, (id) => {
+        const w = rules[id]?.width ?? SKU_LINE_W[id] ?? 'm'
+        return (id === 'skuDimensions' ? DIMS3 : SPAN3)[w]
+      })
+      const totalW = it.weightKg && it.quantity ? `${round2(u.toW(it.weightKg * it.quantity))} ${u.w}` : ''
+      return (
+        <div key={key} className={`rounded-lg border border-line px-4 pb-4 pt-3 ${preview ? 'bg-warm-25' : 'bg-surface'}`}>
+          <div className="mb-3 flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-[13px] font-bold text-ink">SKU {n + 1}</span>
+            {separateLayout && parcels.length > 1 && <span className="text-[12px] text-ink-3">In Package {i + 1}</span>}
+            {(totalW || vol * it.quantity > 0) && <span className="text-[12px] text-ink-3">Total {[totalW, vol * it.quantity > 0 && u.vol(vol * it.quantity)].filter(Boolean).join(' · ')}</span>}
+            {preview && <span className="rounded-full border border-line bg-surface px-1.5 text-[11px] leading-4 text-ink-3">Sample line — how a SKU is entered (not saved)</span>}
+            <span className="ml-auto flex items-center gap-1">
+              {ln.waiting > 0 && !editing && skuMoreButton(open, ln.waiting, ln.waitingFilled, `SKU ${n + 1}`, () => setSkuMore((st) => flip(st, key)))}
+              <Tip text="Remove SKU"><button type="button" aria-label={`Remove SKU ${n + 1}`} onClick={() => { if (!preview) removeItem(i, k) }}
+                className="inline-flex h-8 w-7 items-center justify-center rounded-md text-ink-3 hover:bg-warm-100 hover:text-brand-500">
+                <Trash2 size={14} />
+              </button></Tip>
+            </span>
+          </div>
+          <GridColsCtx.Provider value={GRID_OWN}><div className="@container"><div className={ROW3}>{ln.nodes}</div></div></GridColsCtx.Provider>
+          {missing.length > 0 && !preview && <ErrLine className="mt-2">Required: {missing.join(', ')}</ErrLine>}
+        </div>
+      )
+    }
     return (
       <div key={key} className={`relative border-b border-warm-200 py-3 last:border-0 ${preview ? 'rounded-md bg-warm-25' : ''}`}>
         {preview && (
@@ -3531,21 +3803,37 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           </span>
         )}
         <div className={SKU_COLS} style={skuColsStyle}>
-          <span className="flex h-8 items-center text-[13px] text-ink-3" title={separateLayout && parcels.length > 1 ? `In Package ${i + 1}` : undefined}>{n + 1}</span>
+          {!growLook && <span className="flex h-8 items-center text-[13px] text-ink-3" title={separateLayout && parcels.length > 1 ? `In Package ${i + 1}` : undefined}>{n + 1}</span>}
+          {growLook && <>
           <SkuCode item={it} skus={masters.skus} onPick={(sk) => { if (!preview) pickSku(i, k, sk) }} onUnlink={() => upd({ skuCode: null })}
             onCustom={(code) => upd({ skuCode: code })} autoFocus={!preview && focusLine?.i === i && focusLine.k === k} />
           {/* a master SKU's name comes with it; a typed one is yours to name */}
           <Input value={it.name} placeholder="eg, Refrigerator 300 L" disabled={isMasterSku(it)} onChange={(v) => upd({ name: v })} />
           <NumBox integer min={1} blankZero placeholder="1" value={it.quantity} error={err(it.quantity < 1)} onChange={(q) => upd({ quantity: q })} />
-          {!skuWHid && <NumBox unit={u.w} blankZero placeholder="0" value={u.toW(it.weightKg)} precision={u.precision} error={err(need('skuWeight') && !(it.weightKg > 0))}
-            onChange={(w) => upd({ weightKg: u.fromW(w) })} />}
-          {!skuDHid && <DimsBox units={u} l={it.lengthCm ?? 0} w={it.widthCm ?? 0} h={it.heightCm ?? 0} error={need('skuDimensions')}
-            onChange={(d) => upd({ ...(d.l !== undefined ? { lengthCm: d.l } : {}), ...(d.w !== undefined ? { widthCm: d.w } : {}), ...(d.h !== undefined ? { heightCm: d.h } : {}) })} />}
-          {skuInline.map((k) => <div key={k} className="min-w-0">{skuInlineCell(k, it, upd)}</div>)}
-          <span className="flex min-h-8 flex-col items-end justify-center text-[13px] tabular-nums text-ink-2">
+            {skuInline.map((k) => <div key={k} className="min-w-0">{k === 'skuUnitCost'
+              ? <NumBox blankZero placeholder="0" unit={currency} value={it.unitCost ?? 0} onChange={(c2) => upd({ unitCost: c2 })} />
+              : skuInlineCell(k, it, upd)}</div>)}
+            {!skuDHid && <DimsBox units={u} l={it.lengthCm ?? 0} w={it.widthCm ?? 0} h={it.heightCm ?? 0} error={need('skuDimensions')}
+              onChange={(d) => upd({ ...(d.l !== undefined ? { lengthCm: d.l } : {}), ...(d.w !== undefined ? { widthCm: d.w } : {}), ...(d.h !== undefined ? { heightCm: d.h } : {}) })} />}
+            {!skuWHid && <NumBox blankZero placeholder="0" value={u.toW(it.weightKg)} precision={u.precision} error={err(need('skuWeight') && !(it.weightKg > 0))}
+              onChange={(w) => upd({ weightKg: u.fromW(w) })} />}
+          </>}
+          {!growLook && skuVarCols.map((k) => <div key={k} className="min-w-0">{k === 'skuCodeCol'
+            ? <SkuCode item={it} skus={masters.skus} onPick={(sk) => { if (!preview) pickSku(i, k2, sk) }} onUnlink={() => upd({ skuCode: null })}
+                onCustom={(code) => upd({ skuCode: code })} autoFocus={!preview && focusLine?.i === i && focusLine.k === k2} />
+            : k === 'skuNameCol' ? <Input value={it.name} placeholder="eg, Refrigerator 300 L" disabled={isMasterSku(it)} onChange={(v) => upd({ name: v })} />
+            : k === 'skuQtyCol' ? <NumBox integer min={1} blankZero placeholder="1" value={it.quantity} error={err(it.quantity < 1)} onChange={(q) => upd({ quantity: q })} />
+            : k === 'skuWeight'
+            ? <NumBox unit={u.w} blankZero placeholder="0" value={u.toW(it.weightKg)} precision={u.precision} error={err(need('skuWeight') && !(it.weightKg > 0))}
+                onChange={(w) => upd({ weightKg: u.fromW(w) })} />
+            : k === 'skuDimensions'
+              ? <DimsBox units={u} l={it.lengthCm ?? 0} w={it.widthCm ?? 0} h={it.heightCm ?? 0} error={need('skuDimensions')}
+                  onChange={(d) => upd({ ...(d.l !== undefined ? { lengthCm: d.l } : {}), ...(d.w !== undefined ? { widthCm: d.w } : {}), ...(d.h !== undefined ? { heightCm: d.h } : {}) })} />
+              : skuInlineCell(k, it, upd)}</div>)}
+          {!growLook && <span className="flex min-h-8 flex-col items-end justify-center text-[13px] tabular-nums text-ink-2">
             <span>{it.weightKg && it.quantity ? `${round2(u.toW(it.weightKg * it.quantity))} ${u.w}` : '-'}</span>
             {vol * it.quantity > 0 && <span className="text-[12px] text-ink-3">{u.vol(vol * it.quantity)}</span>}
-          </span>
+          </span>}
           <span className="flex items-center justify-end gap-1">
             {det.waiting > 0 && !editing && skuMoreButton(open, det.waiting, det.waitingFilled, `SKU ${n + 1}`, () => setSkuMore((st) => flip(st, key)))}
             <Tip text="Remove SKU"><button type="button" aria-label={`Remove SKU ${n + 1}`} onClick={() => { if (!preview) removeItem(i, k) }}
@@ -3554,7 +3842,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
             </button></Tip>
           </span>
         </div>
-        {missing.length > 0 && !preview && <ErrLine className="mt-1.5 pl-10">Required: {missing.join(', ')}</ErrLine>}
+        {missing.length > 0 && !preview && <ErrLine className={`mt-1.5 ${growLook ? '' : 'pl-10'}`}>Required: {missing.join(', ')}</ErrLine>}
         {det.node}
       </div>
     )
@@ -3575,13 +3863,14 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     /* owner, 2026-10-06 ("reduce quantity and weight width; Package Id in the line without expanding"): one wrapping row,
        each field its own width — Quantity and Weight narrow */
     const PKG_KEY: Record<string, string> = { type: 'pkgType', qty: 'pkgQty', dims: 'pkgDimensions', weight: 'pkgWeight', tr: 'pkgTracking', pid: 'pkgId', de: 'pkgDescription', ps: 'pkgPalletSpace' }
-    /* the builder's Width in the package's line: S = the field's own size · M / L = wider · Full = the whole line */
-    const PKG_WIDE = { m: 'flex-[1_1_200px] max-w-[320px]', l: 'flex-[1.6_1_280px] max-w-[460px]', full: 'flex-[1_1_100%] max-w-none' }
+    /* owner, 2026-10-28 ("in Package and SKU too the builder's sizes should follow"): the package's fields sit in the same
+       field grid as every card — S half a field · M one · L two · Full the row. L × W × H starts at L (three boxes). */
+    const PKG_DEFAULT_W: Record<string, FieldWidth> = { dims: 'l' }
     const cell = (id: string) => {
-      const w = rules[PKG_KEY[id] ?? id]?.width
-      return `max-sm:basis-full ${w && w !== 's' ? PKG_WIDE[w] : PKG_CELL[id] ?? PKG_CELL.other}`
+      const w = rules[PKG_KEY[id] ?? id]?.width ?? PKG_DEFAULT_W[id] ?? 'm'
+      return (id === 'dims' ? DIMS3 : SPAN3)[w]
     }
-    const r = arrange(sortApi, 'package', [
+    const pkgEntries: RevealEntry[] = [
       /* 2026-10-07: every package field is a builder field — Package Type hidden = a Custom package (its size typed),
          Quantity hidden = one box per line, weight / size hidden = not asked */
       !hid('pkgType') && ['pkgType', <div key="type" className={cell('type')} title={packageTypeTitle}>
@@ -3593,7 +3882,25 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           error={err(!(p.quantity > 0))} disabled={barcodeEach && p.quantity <= 1} onChange={(q) => setParcel(i, { quantity: q })} />
       </div>, true],
       /* a preset fills its master size, and it stays editable (owner, 2026-10-07: "dimension can be edited here") */
-      !hid('pkgDimensions') && ['pkgDimensions', <div key="dims" className={cell('dims')}>
+      !hid('pkgDimensions') && ['pkgDimensions', growLook ? (
+        /* Grow (owner, 2026-10-27, the Grow team's form): Length · Width · Height as three fields */
+        <div key="dims" className="flex-[3_1_330px] max-w-[440px] max-sm:basis-full">
+          <Configurable fieldKey="pkgDimensions">
+            <div className="grid grid-cols-3 gap-x-3">
+              {(['l', 'w', 'h'] as const).map((k) => {
+                const req = isCustom && need('pkgDimensions')
+                return (
+                  <label key={k} className="block min-w-0">
+                    <span className="field-label mb-1.5 block break-words">{{ l: 'Length', w: 'Width', h: 'Height' }[k]} ({u.d}){req && <span className="req-star">*</span>}</span>
+                    <NumBox blankZero placeholder={`eg, ${k === 'l' ? 30 : k === 'w' ? 20 : 15}`} value={u.toD(p[k])} precision={u.precision}
+                      error={showErrors && req && !(p[k] > 0) ? 'x' : undefined} onChange={(n) => setParcel(i, { [k]: u.fromD(n) })} />
+                  </label>
+                )
+              })}
+            </div>
+          </Configurable>
+        </div>
+      ) : <div key="dims" className={cell('dims')}>
         <SFld fieldKey="pkgDimensions" label={`${ownLbl('pkgDimensions', 'Dimensions')} (${u.d})`} required={isCustom && need('pkgDimensions')}
           error={isCustom && need('pkgDimensions') && !(p.l > 0 && p.w > 0 && p.h > 0)} helper={isCustom ? undefined : 'Filled from the package type — edit if this box differs'}>
           <DimsBox units={u} l={p.l} w={p.w} h={p.h} error={isCustom && need('pkgDimensions')} onChange={(d) => setParcel(i, d)} />
@@ -3601,6 +3908,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       </div>, p.l > 0],
       !hid('pkgWeight') && ['pkgWeight', <div key="weight" className={cell('weight')}>
         <FNum fieldKey="pkgWeight" label={`${ownLbl('pkgWeight', 'Weight')} (${u.w})`} required={need('pkgWeight')} placeholder="eg, 10" blankZero value={u.toW(p.weight)} precision={u.precision}
+          unit={growLook ? u.w.toUpperCase() : undefined}
           error={err(need('pkgWeight') && !(p.weight > 0))} onChange={(w) => setParcel(i, { weight: u.fromW(w), weightMode: 'manual' })} />
       </div>, p.weight > 0],
       !hid('pkgTracking') && ['pkgTracking', <div key="tr" className={cell('tr')}>
@@ -3619,13 +3927,24 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       !hid('pkgPalletSpace') && ['pkgPalletSpace', <div key="ps" className={cell('ps')}>
         <F fieldKey="pkgPalletSpace" label={lbl('pkgPalletSpace')} value={p.palletSpace ?? ''} placeholder="eg, 10" onChange={(v) => setParcel(i, { palletSpace: v })} />
       </div>, filled(p.palletSpace)],
-    ], inMore, secOpen(`pkg:${i}`), undefined, cell)
+    ]
+    /* Grow (owner, 2026-10-27, the Grow team's form): Weight right after Quantity, then Length · Width · Height */
+    if (growLook) {
+      const wi = pkgEntries.findIndex((e) => !!e && e[0] === 'pkgWeight')
+      const di = pkgEntries.findIndex((e) => !!e && e[0] === 'pkgDimensions')
+      if (wi > di && di >= 0) pkgEntries.splice(di, 0, ...pkgEntries.splice(wi, 1))
+    }
+    const r = arrange(sortApi, 'package', pkgEntries, inMore, secOpen(`pkg:${i}`), undefined, cell)
     return (
       <>
         {/* owner, 2026-09-29: the package's details chevron sits IN its field row (at the end, level with the
             inputs: label 20 + 6px gap, then centred on the 32px control) — like a SKU row's chevron */}
         <div className="relative">
-        <div className={`flex flex-wrap items-start ${FIELD_GAPS} pr-10`}>{r.nodes}</div>
+        {/* owner, 2026-10-28 ("Quantity: S is extra small, M too large"): a package's fields are short, so its row is denser than a
+            card's — by the card's own width, 2 · 4 · 6 fields a row (M ≈ a sixth of a wide card, S half that, L two) */}
+        <GridColsCtx.Provider value={GRID_OWN}><div className="@container pr-10">
+          <div className={`fgrid3-cq grid grid-cols-1 items-end ${FIELD_GAPS} @min-[380px]:grid-cols-6 @min-[640px]:grid-cols-12 @min-[960px]:grid-cols-18`}>{r.nodes}</div>
+        </div></GridColsCtx.Provider>
         <RevealToggle open={secOpen(`pkg:${i}`)} onToggle={() => toggleSec(`pkg:${i}`)} waiting={r.waiting} waitingFilled={r.waitingFilled}
           label="package details" iconOnly className="absolute right-1 top-7" />
         </div>
@@ -3676,15 +3995,15 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     const actions = (
       <span className="flex shrink-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
         {/* owner, 2026-10-06: the package's units — its weight, its size and its SKUs follow */}
-        {open && !separateLayout && <span className="mr-2"><UnitPick units={u} label={`Package ${i + 1} units`} onChange={(patch) => setParcel(i, patch)} /></span>}
+        {open && !separateLayout && !growLook && <span className="mr-2"><UnitPick units={u} label={`Package ${i + 1} units`} onChange={(patch) => setParcel(i, patch)} /></span>}
         {!editing && <Tip text="Duplicate — a copy right below"><button type="button" aria-label={`Duplicate package ${i + 1}`} onClick={() => duplicateParcel(i)}
           className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-3 hover:bg-warm-100 hover:text-ink">
           <Copy size={14} />
         </button></Tip>}
-        {many && <Tip text={separateLayout ? 'Remove package — its SKUs move to the first package' : 'Remove package'}><button type="button"
-          aria-label={`Remove package ${i + 1}`} onClick={() => removeParcel(i)}
+        {(many || (growLook && !editing)) && <Tip text={!many ? 'Clear this package' : separateLayout ? 'Remove package — its SKUs move to the first package' : 'Remove package'}><button type="button"
+          aria-label={`Remove package ${i + 1}`} onClick={() => (many ? removeParcel(i) : setParcels([newParcel()]))}
           className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-3 hover:bg-warm-100 hover:text-brand-500">
-          <CircleMinus size={14} />
+          {growLook ? <X size={15} /> : <CircleMinus size={14} />}
         </button></Tip>}
         {many && <button type="button" aria-label={open ? `Fold package ${i + 1}` : `Open package ${i + 1}`} aria-expanded={open}
           onClick={() => setOpenPkgId(open ? null : id)}
@@ -3709,7 +4028,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     const n = skusOf(p).length
     return (
       <div key={id} className="mt-2 overflow-hidden rounded-lg border border-warm-200 first:mt-0">
-        <div className={`flex items-center gap-4 bg-warm-50 py-1.5 pl-4 pr-2 ${many ? 'cursor-pointer' : ''}`}
+        <div className={`flex items-center gap-4 py-1.5 pl-4 pr-2 ${growLook ? 'bg-surface pt-3' : 'bg-warm-50'} ${many ? 'cursor-pointer' : ''}`}
           onClick={many ? () => setOpenPkgId(null) : undefined}>
           <span className="shrink-0 text-[13px] font-bold text-ink">Package {i + 1}</span>
           <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">
@@ -3717,7 +4036,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           </span>
           {actions}
         </div>
-        <div className="px-4 py-5">{body}</div>
+        <div className="px-4 py-4">{body}</div>
       </div>
     )
   }
@@ -3743,9 +4062,14 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const barU = parcels.length && parcels.every((p) => unitsOf(p).w === unitsOf(parcels[0]).w) ? unitsOf(parcels[0]) : METRIC
   const addPackageBar = (
     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-      <AddMoreButton label="Add Package" onClick={addParcel} />
-      {/* one package: its header already carries the totals */}
-      {parcels.length > 1 && (
+      {growLook
+        /* Grow (owner, 2026-10-27, the Grow team's form): a plain "+ Add Package" link and the totals on the right */
+        ? <button type="button" onClick={addParcel} className="inline-flex h-8 items-center gap-1.5 rounded-md px-1.5 text-[13px] font-bold text-ink hover:bg-warm-50 hover:text-brand-500">
+            <Plus size={15} />Add Package
+          </button>
+        : <AddMoreButton label="Add Package" onClick={addParcel} />}
+      {/* one package: its header already carries the totals (Grow says them anyway) */}
+      {(parcels.length > 1 || growLook) && (
         <span className="text-[13px] text-ink-2">
           {plural(pieces, 'piece')} · {round2(barU.toW(parcels.reduce((n, p) => n + (p.weight || 0) * (p.quantity || 0), 0)))} {barU.w} in {plural(parcels.length, 'package')}
         </span>
@@ -3812,7 +4136,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           </button>
         )}
       </div>
-      <div className="mt-8"><SubTitle>Packages</SubTitle></div>
+      <div className="mt-6"><SubTitle>Packages</SubTitle></div>
       {packageList((p, i) => <>
         {packageFields(p, i)}
         {packPicker(p, i)}
@@ -3828,7 +4152,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           : (p.items ?? []).length > 0 ? <div className="mt-6">{skuTable((p.items ?? []).map((it, k) => skuRow(it, i, k, k)), unitsOf(p))}</div>
           /* the builder shows a sample SKU line, so its fields can be set without adding one */
           : editing ? <div className="mt-6">{skuTable(skuRow(blankItem(), i, 0, 0, true), unitsOf(p))}</div> : null,
-        skusAsked ? <AddRowLink label="Add SKU" onClick={() => addItem(i)} /> : undefined))}
+        skusAsked ? <AddRowLink label="Add SKU" quiet={growLook} onClick={() => addItem(i)} /> : undefined))}
       {addPackageBar}
     </div>
   )
@@ -3847,9 +4171,10 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
         : separateLayout ? 'List the SKUs, then the packages — each package picks the SKUs packed in it.'
         : "Each package, and the SKUs packed in it. A package's weight adds up from its type and SKUs unless you type one."}
       action={useItems && !editing ? <UnitPick units={iu} onChange={(patch) => setItemUnit((x) => ({ ...x, ...patch }))} label="Units of the SKUs" />
-        : separateLayout && !editing ? <UnitPick units={sepUnits} onChange={setAllUnits} label="Units of the SKUs and packages" /> : undefined}>
-      {editing && !isFtl && (
-        <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-lg border border-dashed border-warm-300 px-4 pb-3 pt-4">
+        : separateLayout && !editing ? <UnitPick units={sepUnits} onChange={setAllUnits} label="Units of the SKUs and packages" />
+        : editing && !isFtl ? optsButton('packages', 'Sections') : undefined}>
+      {editing && !isFtl && cardOpts === 'packages' && (
+        <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-3 rounded-lg bg-warm-50 px-4 pb-3 pt-4">
           <span className="text-[13px] font-bold text-ink">Sections</span>
           {sectionChip(PKG_SECTION, <Package size={14} className="text-ink-3" />)}
           {sectionChip(SKU_SECTION, <Barcode size={14} className="text-ink-3" />)}
@@ -3866,6 +4191,14 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
         </div>
       )}
       {useItems ? itemsBlock : separateLayout ? separateBlock : packagesBlock}
+      {/* Grow (owner, 2026-10-27, the Grow team's form): the merchant declares there is nothing dangerous inside */}
+      {merchantMode && (
+        <div className="mt-6 border-t border-warm-200 pt-4">
+          <Checkbox checked={!!c.dgDeclared} onChange={(v) => setC({ dgDeclared: v })}
+            label={<span className="text-[14px] text-ink">I declare that this shipment does not have Dangerous goods<span className="req-star">*</span></span>} />
+          {showErrors && !c.dgDeclared && <ErrLine className="mt-1.5">Confirm the dangerous-goods declaration.</ErrLine>}
+        </div>
+      )}
     </FormCard>
   )
 
@@ -3886,8 +4219,8 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       <>
         <div className="rounded-lg border border-warm-200">
           <div className="grid grid-cols-[1.4fr_120px_150px_1.3fr_32px] gap-3 rounded-t-lg bg-warm-50 px-4 py-3 text-[13px] text-ink">
-            <span>Vehicle Type<span className="text-danger-fg"> *</span></span><span>No. of Vehicles<span className="text-danger-fg"> *</span></span>
-            <span>Est. Load<span className="text-danger-fg"> *</span></span><span>Deliver To<span className="text-danger-fg"> *</span></span><span />
+            <span>Vehicle Type<span className="req-star">*</span></span><span>No. of Vehicles<span className="req-star">*</span></span>
+            <span>Est. Load<span className="req-star">*</span></span><span>Deliver To<span className="req-star">*</span></span><span />
           </div>
           {rows.map((r, i) => {
             const each = payload(r.vehicleType)
@@ -3970,126 +4303,94 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const vasOpts = merchantMode
     ? VAS_SERVICES.map((v) => ({ value: v, label: laneVasPrice(v, currency) ? `${v} · ${money(laneVasPrice(v, currency), currency)}` : v }))
     : VAS_OPTS
-  const VAS_COLS = 'grid grid-cols-[120px_minmax(0,1.6fr)_minmax(0,1.6fr)_112px_minmax(0,1.2fr)_32px] items-start gap-x-3'
+  /** a VAS line's default widths (3 units a field): the service and the remark wider, the time narrow */
+  const VAS_LINE_W: Record<string, FieldWidth> = { service: 'l', vasTime: 's', vasRemark: 'l' }
   /* the builder shows one sample service line (owner, 2026-10-05) — the real list otherwise */
   const vasShown: VasLine[] = (c.vas ?? []).length || !editing ? (c.vas ?? []) : [{ ...newVas(), level: isFtl ? 'CONSIGNMENT' : 'SKU' }]
   /* owner, 2026-09-29: a block whose fields are all hidden leaves no divider and no space */
-  const extrasVisible = extrasReveal.nodes.length > 0 || extrasReveal.waiting > 0 || !hid('vas')
   /* `below` = something sits above it in the card (the service fields, or + Add field while editing): only then the
      divider. Owner, 2026-10-06: with VAS alone on Grow, the card showed an empty band and a rule above it. */
   const addVasButton = <AddMoreButton label="Add service" onClick={() => setC({ vas: [...(c.vas ?? []),
     isFtl ? { ...newVas(), level: 'CONSIGNMENT' } : { ...newVas(), level: skuLineOpts.length ? 'SKU' : 'PACKAGE', packageId: goods.length === 1 ? goods[0].packageId : undefined }] })} />
-  /* `alone` = VAS is all the card holds: the CARD is titled Value Added Services with Add service in its header, so the
-     block drops its own heading (no two headings in a row) */
-  const extrasSection = (below: boolean, alone = false) => !extrasVisible ? null : (
-    <div className={below ? 'mt-8 border-t border-warm-200 pt-8' : ''}>
-      {extrasReveal.nodes}
-      <RevealToggle open={secOpen('sec-service')} onToggle={() => toggleSec('sec-service')} waiting={extrasReveal.waiting} waitingFilled={extrasReveal.waitingFilled} className="mt-4" />
-      {!hid('vas') && (
-        <Configurable fieldKey="vas">
-      <div className={extrasReveal.nodes.length ? 'mt-8' : ''}>
+  /** the VAS list — under the instructions, or (Grow, owner 2026-10-27) the whole of its own card */
+  function vasBlock(alone: boolean, below: boolean) {
+    return !hid('vas') && (
+      <div className={below ? 'mt-6' : ''}>
         {!alone && <SubTitle right={addVasButton}>{lbl('vas')}</SubTitle>}
         {vasShown.length === 0
           ? (alone ? <p className="text-[13px] text-ink-3">No services added.</p> : null)
           : (
-            <div className="overflow-x-auto">
-              <div className="min-w-[760px]">
-                <div className={`${VAS_COLS} border-b border-warm-200 pb-2 text-[13px] text-ink-2`}>
-                  <span>Added to<span className="text-danger-fg"> *</span></span>
-                  <span>{isFtl ? 'Booking' : 'Package / SKU'}<span className="text-danger-fg"> *</span></span>
-                  <span>Service<span className="text-danger-fg"> *</span></span>
-                  <span>Time (min)</span>
-                  <span>Remark</span>
-                  <span />
-                </div>
-                {editing && !(c.vas ?? []).length && <p className="pt-2 text-[11px] text-ink-3">Sample line — how a service is added (not saved)</p>}
-                {vasShown.map((v, i) => {
-                  const missing = [!v.service && 'service', v.level === 'SKU' && !v.skuCode && 'SKU', v.level === 'PACKAGE' && !v.packageId && 'package'].filter(Boolean) as string[]
-                  return (
-                    <div key={i} className="border-b border-warm-200 py-2.5 last:border-0">
-                      <div className={VAS_COLS}>
-                        {isFtl
-                          ? <ReadBox value="Whole booking" />
-                          : <MenuSelect value={v.level} options={['PACKAGE', 'SKU']} labels={(x) => (x === 'SKU' ? 'SKU' : 'Package')}
-                              onChange={(x) => setVas(i, { level: x as VasLine['level'], skuCode: '', packageId: x === 'PACKAGE' && goods.length === 1 ? goods[0].packageId : undefined })} />}
-                        {isFtl ? <ReadBox value="Every vehicle" />
-                          : v.level === 'SKU'
-                            ? <MenuSelect value={v.skuCode} placeholder={skuLineOpts.length ? 'Pick a SKU' : 'Add a SKU first'} searchable={skuLineOpts.length > 8}
-                                options={skuLineOpts.map((o) => o.value)} labels={(x) => skuLineOpts.find((o) => o.value === x)?.label ?? x} onChange={(x) => setVas(i, { skuCode: x })} />
-                            : <MenuSelect value={v.packageId ?? ''} placeholder="Pick a package"
-                                options={goods.map((g) => g.packageId ?? '').filter(Boolean)}
-                                labels={(x) => { const n = goods.findIndex((g) => g.packageId === x); const g = goods[n]; return g ? `Package ${n + 1} · ${g.packageTypeName === CUSTOM_PACKAGE_NAME ? (g.items?.[0]?.name || 'Custom') : g.packageTypeName} × ${g.quantity}` : x }}
-                                onChange={(x) => setVas(i, { packageId: x })} />}
-                        <MenuSelect value={v.service} placeholder="Pick a service" searchable options={vasOpts.map((o) => o.value)}
-                          labels={(x) => vasOpts.find((o) => o.value === x)?.label ?? x} onChange={(x) => setVas(i, { service: x })} />
-                        <NumBox integer blankZero placeholder="0" unit="min" value={v.serviceTimeMin} onChange={(n) => setVas(i, { serviceTimeMin: n })} />
-                        <Input value={v.remark} placeholder="eg, Second floor" onChange={(x) => setVas(i, { remark: x })} />
-                        <Tip text="Remove service"><button type="button" aria-label={`Remove service ${i + 1}`} onClick={() => setC({ vas: (c.vas ?? []).filter((_, j) => j !== i) })}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-3 hover:bg-warm-100 hover:text-brand-500">
-                          <Trash2 size={14} />
-                        </button></Tip>
-                      </div>
-                      {missing.length > 0 && <ErrLine className="mt-1.5">Required: {missing.join(', ')}</ErrLine>}
+            /* owner, 2026-10-28: each VAS line is a field row like a package's — its field names above, one zone (`vas-line`): drag,
+               S / M / L / Full; Time and Remark are builder fields (show · Required) */
+            <div className="grid gap-3">
+              {vasShown.map((v, i) => {
+                const missing = [!v.service && 'service', need('vasTime') && !(v.serviceTimeMin > 0) && 'time', need('vasRemark') && !filled(v.remark) && 'remark', v.level === 'SKU' && !v.skuCode && 'SKU', v.level === 'PACKAGE' && !v.packageId && 'package'].filter(Boolean) as string[]
+                const sample = editing && !(c.vas ?? []).length
+                const ln = arrange(sortApi, 'vas-line', [
+                  [null, <SFld key="level" label="Added to" required>{isFtl
+                    ? <ReadBox value="Whole booking" />
+                    : <MenuSelect value={v.level} options={['PACKAGE', 'SKU']} labels={(x) => (x === 'SKU' ? 'SKU' : 'Package')}
+                        onChange={(x) => setVas(i, { level: x as VasLine['level'], skuCode: '', packageId: x === 'PACKAGE' && goods.length === 1 ? goods[0].packageId : undefined })} />}
+                  </SFld>],
+                  [null, <SFld key="target" label={isFtl ? 'Booking' : v.level === 'SKU' ? 'SKU' : 'Package'} required>{isFtl ? <ReadBox value="Every vehicle" />
+                    : v.level === 'SKU'
+                      ? <MenuSelect value={v.skuCode} placeholder={skuLineOpts.length ? 'Pick a SKU' : 'Add a SKU first'} searchable={skuLineOpts.length > 8}
+                          options={skuLineOpts.map((o) => o.value)} labels={(x) => skuLineOpts.find((o) => o.value === x)?.label ?? x} onChange={(x) => setVas(i, { skuCode: x })} />
+                      : <MenuSelect value={v.packageId ?? ''} placeholder="Pick a package"
+                          options={goods.map((g) => g.packageId ?? '').filter(Boolean)}
+                          labels={(x) => { const n = goods.findIndex((g) => g.packageId === x); const g = goods[n]; return g ? `Package ${n + 1} · ${g.packageTypeName === CUSTOM_PACKAGE_NAME ? (g.items?.[0]?.name || 'Custom') : g.packageTypeName} × ${g.quantity}` : x }}
+                          onChange={(x) => setVas(i, { packageId: x })} />}
+                  </SFld>],
+                  [null, <SFld key="service" label="Service" required>
+                    <MenuSelect value={v.service} placeholder="Pick a service" searchable options={vasOpts.map((o) => o.value)}
+                      labels={(x) => vasOpts.find((o) => o.value === x)?.label ?? x} onChange={(x) => setVas(i, { service: x })} />
+                  </SFld>],
+                  !hid('vasTime') && ['vasTime', <SFld key="vasTime" fieldKey="vasTime" label={lbl('vasTime')} required={need('vasTime')}>
+                    <NumBox integer blankZero placeholder="0" unit="min" value={v.serviceTimeMin} onChange={(n) => setVas(i, { serviceTimeMin: n })} />
+                  </SFld>, v.serviceTimeMin > 0],
+                  !hid('vasRemark') && ['vasRemark', <SFld key="vasRemark" fieldKey="vasRemark" label={lbl('vasRemark')} required={need('vasRemark')}>
+                    <Input value={v.remark} placeholder="eg, Second floor" onChange={(x) => setVas(i, { remark: x })} />
+                  </SFld>, filled(v.remark)],
+                ], () => false, true, undefined, (id) => SPAN3[rules[id]?.width ?? VAS_LINE_W[id] ?? 'm'])
+                return (
+                  <div key={i} className={`rounded-lg border border-line px-4 pb-4 pt-3 ${sample ? 'bg-warm-25' : 'bg-surface'}`}>
+                    <div className="mb-3 flex min-h-8 items-center gap-3">
+                      <span className="text-[13px] font-bold text-ink">Service {i + 1}</span>
+                      {sample && <span className="rounded-full border border-line bg-surface px-1.5 text-[11px] leading-4 text-ink-3">Sample line — how a service is added (not saved)</span>}
+                      <span className="ml-auto"><Tip text="Remove service"><button type="button" aria-label={`Remove service ${i + 1}`} onClick={() => setC({ vas: (c.vas ?? []).filter((_, j) => j !== i) })}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-3 hover:bg-warm-100 hover:text-brand-500">
+                        <Trash2 size={14} />
+                      </button></Tip></span>
                     </div>
-                  )
-                })}
-              </div>
+                    <GridColsCtx.Provider value={GRID_OWN}><div className="@container"><div className={ROW3}>{ln.nodes}</div></div></GridColsCtx.Provider>
+                    {missing.length > 0 && <ErrLine className="mt-2">Required: {missing.join(', ')}</ErrLine>}
+                  </div>
+                )
+              })}
             </div>
           )}
       </div>
-        </Configurable>
-      )}
-    </div>
-  )
+      )
+  }
 
   /* ------------------------------------------------------------ 4 · Service
      How it moves: the service, the load type, the vehicle — and the two questions about the MOVE itself:
      clearance on the way, and the loading time a full vehicle needs. */
-  const dedicatedSpec = vehicleTypeOf(hubVehicles, vehicleChoice)
-  const shipFromHubName = shipFromHub ? hubName(shipFromHub, stores) : ''
   /* one zone for the card's fields — the console's Service Type, Load type and Vehicle Type join the label / loading
      time / own fields (Grow asks its service in its own card, so only the latter are on Grow) */
   const svcReveal = arrange(sortApi, 'service', [
-    !merchantMode && !hid('serviceType') && [null, isFtl
-      ? <F key="serviceType" fieldKey="serviceType" label={lbl('serviceType')} required value={ftlService} options={opts(FTL_SERVICE_CODES)} placeholder="eg, Service" onChange={pickFtlService} />
-      : <F key="serviceType" fieldKey="serviceType" label={lbl('serviceType')} required value={service} options={opts(SERVICE_TYPES)} placeholder="eg, Service" searchable onChange={setService} />],
     /* owner, 2026-10-06: the load type is a toggle (the second branch's Dedicate Truck), as wide as the fields beside it —
        off = a shared vehicle, on = a full one; no hint line (only when the service decides it) */
-    !merchantMode && !isFtl && !hid('dedicateTruck') && [null, <SFld key="loadType" fieldKey="dedicateTruck" label={custom('dedicateTruck', 'Dedicate Truck', 'Load type')}
-      helper={dedicatedLocked ? `Set by the service — ${serviceLoad === 'ftl' ? 'full' : 'shared'} vehicle only` : undefined}>
-      <SwitchBox icon={Truck} label="Dedicate Truck" checked={dedicated} disabled={dedicatedLocked || !!fromOverage} onChange={setDedicateTruck}
-        title={dedicated ? 'Full vehicle (FTL / FCL) — a whole vehicle just for this consignment' : 'Shared vehicle (LTL / LCL) — switch on for a whole vehicle'} />
-    </SFld>],
-    /* Vehicle Type applies to a dedicated truck only — disabled (and empty) until Dedicate Truck is on */
-    !merchantMode && !isFtl && !hid('vehicleType') && [null, <SFld key="vehicleType" fieldKey="vehicleType" label={lbl('vehicleType')}
-      helper={dedicated ? dedicatedSpec?.capacity || undefined : undefined}>
-      {shipFromHub
-        ? <MenuSelect value={dedicated ? vehicleChoice : ''} disabled={!dedicated}
-            placeholder={!dedicated ? 'Turn on Dedicate Truck' : hubVehicles.length ? 'eg, 8 Ton Truck' : `No vehicles configured at ${shipFromHubName}`}
-            options={['', ...hubVehicles.map((v) => v.code)]}
-            labels={(v) => (v ? vehicleTypeOf(hubVehicles, v)?.name ?? v : '— None —')} searchable onChange={setDedicatedType} />
-        : <Input value="" placeholder="Enter Ship From first" disabled onChange={() => undefined} />}
-    </SFld>],
+    /* owner, 2026-10-27: how it moves is ONE switch (it replaced the Shipment legs pills under the addresses) — on = through a
+       hub, the legs follow Ship From and Ship To; off = Pick & Del, one trip, no hub. The line under it says what is created. */
+    /* owner, 2026-10-27 (aligned with the Grow team's form): NO Vehicle Type field — Dedicate Truck alone says "a whole
+       vehicle"; which vehicle is assigned when it is planned, from the Ship From hub's fleet (its line says so) */
     !hid('labelFormat') && ['labelFormat', <F key="lf" fieldKey="labelFormat" label={lbl('labelFormat')} value={c.labelFormat ?? ''} placeholder="eg, PDF"
       options={opts(LABEL_FORMATS)} onChange={(v) => setC({ labelFormat: v })} />, !!c.labelFormat],
     !hid('totalLoadingTime') && ['totalLoadingTime', <FNum key="lt" fieldKey="totalLoadingTime" label={custom('totalLoadingTime', 'Total Loading Time (minutes)', 'Total Loading Time')}
       blankZero integer unit="min" placeholder="minutes" value={c.totalLoadingTime ?? 0} onChange={(n) => setC({ totalLoadingTime: n || null })} />, (c.totalLoadingTime ?? 0) > 0],
     ...customEntries('sec-service'),
   ], inMore, secOpen('sec-service'))
-  /* only the services are left in the card (every other field hidden, the form not being edited) */
-  const svcAbove = svcReveal.nodes.length > 0 || svcReveal.waiting > 0 || editing
-  const vasAlone = !svcAbove && extrasReveal.nodes.length === 0 && extrasReveal.waiting === 0 && !hid('vas')
-  const serviceSection = (
-    <FormCard id="sec-service" title={vasAlone ? lbl('vas') : 'Service & instructions'} action={vasAlone ? addVasButton : undefined}
-      caption={vasAlone ? 'Any service on top of the delivery — installation, assembly, a tail-lift…'
-        : 'How it moves, anything the carrier should know, and any service on top of the delivery.'}>
-      {svcReveal.nodes.length > 0 && <SGrid>{svcReveal.nodes}</SGrid>}
-      <RevealToggle open={secOpen('sec-service')} onToggle={() => toggleSec('sec-service')} waiting={svcReveal.waiting} waitingFilled={svcReveal.waitingFilled} className="mt-6" />
-      {addFieldLink('sec-service')}
-      {extrasSection(svcAbove, vasAlone)}
-    </FormCard>
-  )
-
   /* ------------------------------------------------------------ 6 · Carriers — LAST (owner, 2026-09-29):
      the carrier is chosen once everything it has to carry is known */
   const carrierSection = (
@@ -4097,6 +4398,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       caption="Who carries this consignment — pick one.">
       {/* pills on the card — the Handling chips' look (the chosen one: ink border, warm-50, bold, a check) */}
       <div>
+        <Configurable fieldKey="carrier">
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Carriers">
           {CARRIERS.map((k) => {
             const on = c.carrier === k.code
@@ -4109,31 +4411,31 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
             )
           })}
         </div>
-        {!c.carrier && <ErrLine className="mt-3">Pick a carrier.</ErrLine>}
+        </Configurable>
+        {need('carrier') && !c.carrier && <ErrLine className="mt-3">Pick a carrier.</ErrLine>}
       </div>
     </FormCard>
   )
 
   /* ============================================================ Grow (merchant): the console's Handling card with the
      load type asked in it · Service & instructions (label, note, VAS) · Service Type (the lane's cards, LAST) */
+  /* owner, 2026-10-27 (the Grow team's form): ONE "Handling & Instructions" card — the handling, then the label and the
+     note for the carrier; the value-added services are a card of their own */
+  const instrNodes = [...svcReveal.nodes, ...extrasReveal.nodes]
+  const instrWaiting = svcReveal.waiting + extrasReveal.waiting
   const merchantHandlingSection = (
-    <FormCard id="sec-handling" title="Handling" caption="How the goods must be handled on the way, and how they travel.">
+    <FormCard id="sec-handling" title="Handling & Instructions" caption="How the goods must be handled on the way, how they travel, and anything the carrier should know.">
       {/* the console's Handling content; its switches row always shows on Grow — the load type is on it */}
       {handlingSection.props.children}
+      {instrNodes.length > 0 && <SGrid className="mt-6">{instrNodes}</SGrid>}
+      <RevealToggle open={secOpen('sec-service')} onToggle={() => toggleSec('sec-service')} waiting={instrWaiting}
+        waitingFilled={svcReveal.waitingFilled + extrasReveal.waitingFilled} className="mt-4" />
     </FormCard>
   )
-  const merchantExtrasSection = !(svcReveal.nodes.length > 0 || svcReveal.waiting > 0 || extrasVisible || editing) ? null : (
-    <FormCard id="sec-extras" title={vasAlone ? lbl('vas') : 'Service & instructions'} action={vasAlone ? addVasButton : undefined}
-      caption={vasAlone ? 'Any service on top of the delivery — installation, assembly, a tail-lift…'
-        : 'The label, anything the carrier should know, and any service on top of the delivery.'}>
-      {(svcReveal.nodes.length > 0 || svcReveal.waiting > 0) && (
-        <>
-          <SGrid>{svcReveal.nodes}</SGrid>
-          <RevealToggle open={secOpen('sec-service')} onToggle={() => toggleSec('sec-service')} waiting={svcReveal.waiting} waitingFilled={svcReveal.waitingFilled} className="mt-4" />
-        </>
-      )}
-      {addFieldLink('sec-service', svcReveal.nodes.length > 0 ? 'mt-6' : '')}
-      {extrasSection(svcAbove, vasAlone)}
+  const merchantVasSection = hid('vas') ? null : (
+    <FormCard id="sec-extras" title={lbl('vas')} action={editing ? undefined : addVasButton}
+      caption="Any service on top of the delivery — installation, assembly, a tail-lift…">
+      {vasBlock(true, false)}
     </FormCard>
   )
   /* Grow · Payment (owner, 2026-10-07: "Payment Mode, COD, COD Amount, remarks — asked in the same flow as the form"):
@@ -4143,13 +4445,13 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     !hid('paymentMode') && typeRule.payment && ['paymentMode', <F key="pm" fieldKey="paymentMode" label={lbl('paymentMode')} value={growPayMode}
       options={opts(['Prepaid', 'COD'])} onChange={(v) => setC({ paymentMode: v, ...(v === 'COD' ? {} : { orderAmount: null }) })}
       helper={growPayMode === 'COD' ? 'Cash is collected from the receiver at delivery' : undefined} />, true],
-    !hid('orderAmount') && typeRule.payment && (growPayMode === 'COD' || editing) && ['orderAmount',
+    !hid('paymentMode') && !hid('orderAmount') && typeRule.payment && (growPayMode === 'COD' || editing) && ['orderAmount',
       <FNum key="oa" fieldKey="orderAmount" label={`${custom('orderAmount', 'Order Amount', 'COD Amount')} (${currency})`} required={codAsked} blankZero
         placeholder="eg, 1500" value={c.orderAmount ?? 0} error={err(codAsked && !((c.orderAmount ?? 0) > 0))}
         helper={editing && growPayMode !== 'COD' ? 'Shown for a COD order' : undefined}
         onChange={(n) => setC({ orderAmount: n || null })} />, (c.orderAmount ?? 0) > 0],
     !hid('remarks') && ['remarks', <F key="rm" fieldKey="remarks" label={lbl('remarks')} multiline rows={2} value={c.remarks ?? ''}
-      placeholder="Remarks for the driver or the receiver" className="sm:col-span-2" onChange={(v) => setC({ remarks: v })} />, filled(c.remarks)],
+      placeholder="Remarks for the driver or the receiver" className="sm:col-span-4" onChange={(v) => setC({ remarks: v })} />, filled(c.remarks)],
   ], inMore, secOpen('sec-payment'))
   const paymentSection = !(payReveal.nodes.length > 0 || payReveal.waiting > 0) ? null : (
     <FormCard id="sec-payment" title="Payment" caption="Prepaid or cash on delivery, and a note for the driver or the receiver.">
@@ -4162,11 +4464,11 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   const serviceChooser = (
     <ServiceTypeChooser hideMode vehiclesElsewhere ready={ready} mode={mode} onMode={changeMode} modeLocked={!!fromOverage || pr?.shipmentType === 'FTL'}
       quotes={quotes} selected={selected} onSelect={setService} currency={currency} fleet={fleet} counts={{}} onCount={() => undefined}
-      fleetNote={fleetNote} showErrors={showErrors} serviceLocked={serviceHidden}
+      fleetNote={fleetNote} showErrors={showErrors} serviceLocked={serviceHidden} eta={layout.serviceEta} price={layout.servicePrice} compact
       layout={layout.services} carrier={mode === 'ftl' ? '2GO Logistics' : '2GO Express'} />
   )
   const merchantServiceSection = (
-    <FormCard id="sec-service" title={lbl('serviceType')}
+    <FormCard id="sec-svctype" title={lbl('serviceType')}
       count={layout.services === 'grid' && quotes.length > 1 ? quotes.length : undefined}
       action={editing ? (
         <LayoutSeg label="Show as" value={layout.services} onChange={(v) => setDraftLayout((l) => ({ ...l, services: v }))} options={[
@@ -4174,7 +4476,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           { value: 'menu', label: 'Dropdown', tip: 'One compact dropdown — the shortest step' },
         ]} />
       ) : undefined}
-      caption={`Merchants pick it on the next step (Service & payment), with the estimated rate for this route. ${layout.services === 'menu' ? 'One dropdown.' : 'One card per row.'} Dedicate Truck is in Handling.`}>
+      caption="The services on this route, with the estimated rate and delivery — pick one.">
       {editing ? <Configurable fieldKey="serviceType">{serviceChooser}</Configurable> : serviceChooser}
       {showErrors && !ready && (
         <ErrLine className="mt-3">Add {[!laneReady(sender) && 'a Ship From address', !allDrops.every(laneReady) && 'a Ship To address',
@@ -4183,178 +4485,290 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     </FormCard>
   )
 
+  /* Grow · Payment (owner, 2026-10-27, the Grow team's one-page form): what it costs and HOW it is paid — the old checkout's
+     Payment Summary + "How you pay" (Wallet · Card · Pay later on a Postpaid account (the monthly credit) · COD for a COD order) */
+  /* owner, 2026-10-28 ("merge Handling with Service & instructions, VAS its own section, Service Type as cards or a dropdown
+     in the form builder") — both forms: Handling & Instructions (the handling, then how it moves, the label and the note for
+     the carrier) · Value Added Services · Service Type. The console's Service Type card lists the services as cards (with
+     their days) or one dropdown — the builder's choice (`layout.services`); Grow's is its priced card. */
+  const svcList = isFtl ? FTL_SERVICE_CODES : SERVICE_TYPES
+  const svcValue = isFtl ? ftlService : service
+  const svcPick = isFtl ? pickFtlService : setService
+  const svcAsMenu = layout.services === 'menu'
+  /* the builder's per-form switches for the cards' price and ETA — set from the Ops form for both forms */
+  const svcFlagPills = (flag: 'servicePrice' | 'serviceEta', what: string) => (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-[12px] text-ink-3">{what}</span>
+      {(['console', 'grow'] as const).map((p) => {
+        const who = p === 'grow' ? 'Grow' : 'Ops'
+        const on = draft.layout[p][flag]
+        return (
+          <Tip key={p} text={on ? `${what} shows on the ${who} form — click to hide it` : `${what} is hidden on the ${who} form — click to show it`}>
+            <button type="button" aria-pressed={on} onClick={() => setLayoutOf(p, (l) => ({ ...l, [flag]: !on }))}
+              className={`inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px] font-bold transition-colors
+                ${on ? 'border-brand-200 bg-brand-50 text-brand-600' : 'border-line bg-surface text-ink-3 hover:text-ink'}`}>
+              {on ? <Eye size={11} /> : <EyeOff size={11} />}{who}
+            </button>
+          </Tip>
+        )
+      })}
+    </span>
+  )
+  const svcShowAs = editing ? (
+    <span className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+      {svcFlagPills('servicePrice', 'Price')}
+      {svcFlagPills('serviceEta', 'ETA')}
+      <LayoutSeg label="Show as" value={svcAsMenu ? 'menu' : 'grid'} onChange={(v) => setDraftLayout((l) => ({ ...l, services: v }))} options={[
+        { value: 'grid', label: 'Cards', tip: 'One card per service — name, price, days' },
+        { value: 'menu', label: 'Dropdown', tip: 'One compact dropdown' },
+      ]} />
+    </span>
+  ) : undefined
+  /* owner, 2026-10-28 ("services should be like this"): the same Services card as Grow — two a row, radio + name, the price
+     over "Est. n days" (each shown or not per form: `layout.servicePrice` / `serviceEta`) */
+  const consoleSvcCards = (
+    <div role="radiogroup" aria-label={lbl('serviceType')} className="grid grid-cols-1 gap-2.5 lg:grid-cols-2">
+      {svcList.map((code) => {
+        const sv = SERVICES.find((x) => x.code === code)
+        return (
+          <ServiceChoice key={code} q={{ code, name: code, net: sv?.price ?? 0, days: sv?.days ?? 0 }} carrier="" currency={currency}
+            compact price={layout.servicePrice} eta={layout.serviceEta} selected={svcValue === code} inert={false} onClick={() => svcPick(code)} />
+        )
+      })}
+    </div>
+  )
+  const consoleSvcTypeSection = (
+    <FormCard id="sec-svctype" title={lbl('serviceType')} count={svcAsMenu ? undefined : svcList.length} caption="How it travels and how fast — pick one." action={svcShowAs}>
+      {svcAsMenu
+        ? <SGrid><F fieldKey="serviceType" label={lbl('serviceType')} required value={svcValue} options={opts(svcList)} placeholder="eg, Service" searchable={!isFtl} onChange={svcPick} /></SGrid>
+        : editing ? <Configurable fieldKey="serviceType">{consoleSvcCards}</Configurable> : consoleSvcCards}
+    </FormCard>
+  )
+  /* owner, 2026-10-28 ("Load type should be in the top section — fix this section's design"): Handling & Instructions in three
+     parts, each with a small heading — Handling (the chips; Delivery type with the switches; tags; own fields) · Instructions
+     (label, loading time, special instructions and own fields). Load type is in Consignment details. */
+  const partHead = (t: string, first: boolean) => (
+    <p className={`mb-3 text-[13px] font-bold uppercase tracking-wide text-ink-3 ${first ? '' : 'mt-6 border-t border-line pt-5'}`}>{t}</p>
+  )
+  const handlingBody = handlingSection.props.children
+  const handlingHas = handlingVisible && (handlingChipsVisible || handlingTogglesVisible || handlingCustom.nodes.length > 0 || handlingCustom.waiting > 0 || editing)
+  const instrHas = instrNodes.length > 0 || instrWaiting > 0
+  const handlingInstrSection = (
+    <FormCard id="sec-handling" title="Handling & Instructions" caption="How it moves, how the goods must be handled, and anything the carrier should know.">
+      {handlingHas && <>{partHead('Handling', true)}{handlingBody}</>}
+      {instrHas && (
+        <>
+          {partHead('Instructions', !handlingHas)}
+          {instrNodes.length > 0 && <SGrid>{instrNodes}</SGrid>}
+          <RevealToggle open={secOpen('sec-service')} onToggle={() => toggleSec('sec-service')} waiting={instrWaiting}
+            waitingFilled={svcReveal.waitingFilled + extrasReveal.waitingFilled} className="mt-4" />
+        </>
+      )}
+    </FormCard>
+  )
+  const growPaySection = (
+    <FormCard id="sec-pay" title="Payment" caption="What this consignment costs, and how you pay — one way or split over several.">
+      {growQuote ? (
+        <div className="grid gap-6 @min-[760px]:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="min-w-0"><SplitPaymentSheet split={pay} compact /></div>
+          <div className="space-y-1.5 self-start rounded-lg bg-warm-50 px-4 py-3 text-[13px] text-ink">
+            <div className="flex justify-between"><span className="text-ink-3">Shipping charges · {growQuote.name}</span><span>{money(growRate, currency)}</span></div>
+            <div className="flex justify-between"><span className="text-ink-3">Taxes</span><span>{money(growTax, currency)}</span></div>
+            <div className="flex justify-between border-t border-line pt-2 text-[15px] font-bold"><span>Payable Amount</span><span>{money(growPayable, currency)}</span></div>
+          </div>
+        </div>
+      ) : <p className="text-[13px] text-ink-3">Choose a service to see what you pay.</p>}
+      {showErrors && growQuote && !pay.choice.ready && <ErrLine className="mt-3">{pay.choice.reason ?? 'Choose how you pay.'}</ErrLine>}
+      {showErrors && !growQuote && <ErrLine className="mt-3">Choose a service first.</ErrLine>}
+    </FormCard>
+  )
+
   /* ============================================================ Summary (2026-10-05, owner: "allow to show summary or not … for
      both consignment and Grow portal — their summary section can be different"): a card at the end that adds the
      consignment up while it is filled. The console's lines are the ops view, Grow's the merchant view; the builder
      switches the card on / off and picks its lines for each portal on its own, and the lines take the field order
      (zone `summary`, drag to reorder). */
-  const whenText = (a?: string, b?: string) => {
-    if (!filled(a)) return ''
-    const d = new Date(`${dateOf(a)}T00:00`)
-    const day = isNaN(d.getTime()) ? dateOf(a) : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
-    return `${day} · ${timeOf(a)}${filled(b) ? `–${timeOf(b)}` : ''}`
-  }
   const goodsPieces = goods.reduce((n, p) => n + (p.quantity || 0), 0)
-  const pickupText = merchantMode
-    ? (pickupState === 'auto-rule' ? (autoWin ? `Booked automatically · ${fmtWin(autoWin)}` : 'Booked automatically')
-      : hasWindow ? whenText(sender.windowStart, sender.windowEnd) : pickupState === 'off' ? '' : 'Schedule later')
-    : whenText(sender.windowStart, sender.windowEnd)
-  /* ---- the blocks' content ---- */
-  /* an address reads back only once it has a name or a line (the default country alone is not an address) */
-  const partyText = (p: Party) => (filled(p.name) || filled(p.line1)
-    ? [p.name, p.line1, p.line2, p.city, p.state, p.postalCode, p.country].filter((x) => filled(x)).join(', ') : '')
   const skuUnits = goods.reduce((n, p) => n + (p.quantity || 0) * (p.items ?? []).filter((it) => !isBlankItem(it)).reduce((m, it) => m + (it.quantity || 0), 0), 0)
   const fullVehicle = merchantMode ? mode === 'ftl' : isFtl || dedicated
-  const growCarrier = mode === 'ftl' ? '2GO Logistics' : '2GO Express'
-  const vasAmount = quote ? quote.lines.filter((l) => vasNames.includes(l.label)).reduce((n, l) => n + l.amount, 0) : 0
   const etaDays = merchantMode ? quote?.days ?? null : svc.days
-  const muted = (t: string) => <span className="text-ink-3">{t}</span>
-  const kgText = (n: number) => `${round2(n).toLocaleString()} kg`
-  /* breaks only between its parts — never "2.57 / kg" */
-  const weightLine = [`Dead ${kgText(weights.dead)}`, `Vol ${kgText(weights.volumetric)}`, `Chargeable ${kgText(weights.chargeable)}`]
-    .map((t, i) => <Fragment key={i}>{i > 0 && ' · '}<span className="whitespace-nowrap">{t}</span></Fragment>)
-  type SumBlock = { title: string; value: ReactNode; sub?: ReactNode; jump?: string | null }
-  const sumBlocks: Record<string, SumBlock> = {
-    consignment: {
-      title: 'Consignment', jump: 'sec-consignment',
-      value: <>{merchant?.name ?? muted('No merchant yet')} · {ctype}</>,
-      sub: [filled(effectiveOrder) && `Order ${effectiveOrder.trim()}`, filled(effectiveRef) && effectiveRef.trim() !== effectiveOrder.trim() && `Ref ${effectiveRef.trim()}`]
-        .filter(Boolean).join(' · '),
-    },
-    shipFrom: {
-      title: 'Ship From', jump: 'sec-parties',
-      value: partyText(sender) || '—',
-      sub: merchantMode ? (pickupText ? `Pickup: ${pickupText}` : '') : (pickupText ? `Pick up ${pickupText}` : ''),
-    },
-    shipTo: {
-      title: allDrops.length > 1 ? `Ship To (${allDrops.length} addresses)` : 'Ship To', jump: 'sec-parties',
-      value: allDrops.length > 1
-        ? <>{allDrops.map((d, i) => <span key={i} className="block">{i + 1}. {partyText(d) || '—'}</span>)}</>
-        : partyText(receiver) || '—',
-      sub: !merchantMode && filled(receiver.windowStart) ? `Deliver ${whenText(receiver.windowStart, receiver.windowEnd)}` : '',
-    },
-    legs: {
-      title: 'Shipment legs', jump: 'sec-parties',
-      value: legsDirect ? 'Pick & Del' : legList.length ? legList.map((l) => LEG_INFO[l].name).join(' → ') : muted('No legs yet'),
-      sub: !legsDirect && legList.length && viaHubs.length ? `Via ${viaHubs.join(' → ')}` : '',
-    },
-    goods: isFtl ? {
-      title: 'FTL · Vehicle Details', jump: 'sec-vehicle',
-      value: `${consoleFtl} · ${plural(vehicles.length, 'vehicle')} · ${loadText(actualLoad)}`,
-    } : {
-      /* Grow speaks the merchant's words (the Handling switch), the console the ops' */
-      title: merchantMode ? (fullVehicle ? 'Dedicate Truck · Packages' : 'Packages') : `${fullVehicle ? 'FTL' : 'LTL'} · Packages`, jump: 'sec-packages',
-      value: goodsPieces ? `${plural(goodsPieces, 'package')}${skuUnits ? ` · ${plural(skuUnits, 'SKU unit')}` : ''}` : muted('No packages yet'),
-      sub: <>{goodsPieces > 0 && <span className="block">{weightLine}</span>}
-        {merchantMode && mode === 'ftl' && vehicleLine && <span className="block">Vehicles: {vehicleLine}</span>}</>,
-    },
-    service: merchantMode ? {
-      title: 'Service', jump: growServiceCard ? 'sec-service' : null,
-      value: quote ? `${quote.name} · ${growCarrier}` : muted('Chosen in the next step'),
-      sub: vasNames.length ? `+ ${vasNames.join(', ')}` : '',
-    } : {
-      title: 'Service', jump: consoleServiceCard ? 'sec-service' : null,
-      value: <>{isFtl ? consoleFtl : consoleService} · {isFtl || dedicated ? `Full vehicle${!isFtl && vehicleChoice ? ` · ${vehicleChoice}` : ''}` : 'Shared vehicle'}</>,
-      sub: vasNames.length ? `+ ${vasNames.join(', ')}` : '',
-    },
-    carrier: {
-      title: 'Carrier', jump: 'sec-carrier',
-      value: c.carrier || muted('Not chosen yet'),
-    },
-    /* Grow (2026-10-07): the Payment card read back */
-    payment: {
-      title: 'Payment', jump: paymentSection ? 'sec-payment' : null,
-      value: growPayMode === 'COD' ? `Cash on delivery${codAsked && (c.orderAmount ?? 0) > 0 ? ` · ${money(c.orderAmount ?? 0, currency)}` : ''}` : 'Prepaid',
-      sub: filled(c.remarks) && !isHidden('remarks') ? `Remarks: ${c.remarks!.trim()}` : '',
-    },
-  }
-  const toggleLine = (key: string, on: boolean) => {
-    setDraftSummary((x) => ({ ...x, hidden: on ? x.hidden.filter((k) => k !== key) : [...x.hidden, key] }))
-    if (!on && !showHidden) toast.info('Hidden — “Show hidden fields” brings it back')
-  }
-  const setSummaryOn = (on: boolean) => {
-    setDraftSummary((x) => ({ ...x, enabled: on }))
-    if (!on && !showHidden) toast.info('Summary hidden — “Show hidden fields” brings it back')
-  }
-  const sumLines = summaryLinesOf(formPortal).filter((l) => (editing && showHidden) || !summaryCfg.hidden.includes(l.key))
-  /** while editing: the switch that shows / hides one block or foot row */
-  const lineSwitch = (key: string) => {
-    const off = summaryCfg.hidden.includes(key)
-    return (
-      <Tip text={off ? 'Hidden — switch on to show it' : 'Shown — switch off to hide it'}>
-        <span className="inline-flex shrink-0"><Toggle checked={!off} onChange={(on) => toggleLine(key, on)} /></span>
-      </Tip>
-    )
-  }
-  /* the foot (the totals): Grow = what it costs, the console = how much it is; ETA under both */
-  const footRows = (key: string): [ReactNode, ReactNode, boolean?][] => key === 'eta'
-    ? [[<span title="Estimated — the carrier confirms the delivery date">ETA <span className="font-normal text-ink-3">(est.)</span></span>,
-        etaDays != null ? plural(etaDays, 'day') : '—']]
-    : merchantMode
-      ? quote ? [
-        ['Delivery', money(quote.net - vasAmount, currency)],
-        ...(vasAmount > 0 ? [['Value-added services', money(vasAmount, currency)] as [ReactNode, ReactNode]] : []),
-        [<span title="Estimated, before tax — checkout shows the tax">Total</span>, money(quote.net, currency), true],
-      ]
-        /* step 1 without a service: the lowest rate for this route (the service is picked on the next step) */
-        : [[<span title="Estimated, before tax — you pick the service on the next step">Estimated from</span>, cheapest != null ? money(cheapest, currency) : '—', true]]
-      : [
-        [isFtl ? 'Vehicles' : 'Pieces', isFtl ? String(vehicles.length) : String(goodsPieces)],
-        [isFtl ? 'Load' : 'Chargeable weight', kgText(isFtl ? actualLoad : weights.chargeable), true],
-      ]
+  /* ---- the Summary, in icons (owner, 2026-10-28) — every icon names itself in a tooltip and jumps to its card ---- */
   const summaryTitle = merchantMode ? 'Shipment Summary' : 'Consignment Summary'
-  /* owner, 2026-10-06: the second branch's Shipment Summary — a vertical card beside the form (sticky) when the page is wide
-     enough, under it otherwise */
-  const summarySection = (
-    <section id="sec-summary" aria-label={summaryTitle} className="rounded-xl bg-surface px-5 pb-4 pt-4">
-      <h2 className="pb-3 text-[15px] font-bold text-ink">{summaryTitle}</h2>
-      {editing && (
-        <div className="mb-3 rounded-lg bg-warm-50 px-3 py-2">
-          <Tip text={`Show the summary on the ${formPortal === 'grow' ? 'merchant' : 'operations'} form`}>
-            <InlineSwitch label={summaryCfg.enabled ? 'Shown on this form' : 'Not shown'} checked={summaryCfg.enabled} onChange={setSummaryOn} />
-          </Tip>
-        </div>
-      )}
-      <div className={editing && !summaryCfg.enabled ? 'opacity-50' : ''}>
-        {arrange(sortApi, 'summary', sumLines.filter((l) => !l.foot && sumBlocks[l.key]).map((l): RevealEntry => {
-          const bk = sumBlocks[l.key]
-          const off = summaryCfg.hidden.includes(l.key)
-          return [null, (
-            <div key={l.key} className={`flex gap-3 border-t border-line py-3 ${off ? 'opacity-40' : ''}`}>
-              <div className="min-w-0 flex-1">
-                <p className="text-[12px] font-bold text-ink-3">{bk.title}</p>
-                <div className="mt-0.5 break-words text-[13px] leading-5 text-ink">{bk.value}</div>
-                {bk.sub && <div className="mt-0.5 break-words text-[12px] leading-[18px] text-ink-3">{bk.sub}</div>}
-              </div>
-              {/* owner, 2026-10-06: an Edit BUTTON (not a text link) — jumps to its card */}
-              {editing ? lineSwitch(l.key) : bk.jump && (
-                <Tip text={`Edit ${bk.title}`}>
-                  <button type="button" onClick={() => jumpTo(bk.jump!)} aria-label={`Edit ${bk.title}`}
-                    className="inline-flex h-7 shrink-0 items-center gap-1 self-start rounded-md border border-warm-300 bg-surface px-2 text-[12px] font-bold text-ink-2 transition-colors hover:border-warm-400 hover:bg-warm-50 hover:text-ink">
-                    <Pencil size={12} />Edit
-                  </button>
-                </Tip>
+  /* owner, 2026-10-28 ("mix of icons and text; leg-wise still confusing"): every row is an icon WITH its words. The route is
+     a vertical timeline — each stop (Ship From, a hub, Ship To) a node with its name, each leg on the line between two
+     stops with its icon, name and what happens on it. A click on a row's item jumps to its card. */
+  const jumpBtn = (jump: string | null | undefined, label: string, children: ReactNode, className = '') => (
+    <button type="button" aria-label={label} title={label} disabled={!jump || editing} onClick={() => jump && jumpTo(jump)}
+      className={`min-w-0 text-left transition-colors disabled:cursor-default enabled:hover:bg-warm-100 ${className}`}>{children}</button>
+  )
+  const legList2: LegKind[] = legsDirect ? ['pickAndDeliver'] : legList
+  const partyName = (p: Party) => p.businessName?.trim() || p.name?.trim() || p.line1?.trim() || ''
+  const placeOf = (p: Party) => [p.city, p.state].filter((x) => filled(x)).join(', ')
+  type Stop = { key: string; icon: typeof Truck; title: string; name: string; sub: string; set: boolean; jump: string }
+  const stops: Stop[] = [{
+    key: 'from', icon: fromIsAddress ? MapPin : Warehouse, title: 'Ship From', name: partyName(sender), sub: placeOf(sender),
+    set: filled(sender.name) || filled(sender.line1), jump: 'sec-parties',
+  }]
+  legList2.forEach((k, i) => {
+    if (i === legList2.length - 1) return
+    /* the stop after a leg: First Mile ends at the origin hub, Line Haul at the destination hub */
+    const code = k === 'pickup' ? originHub : destHub
+    stops.push({ key: `hub${i}`, icon: Warehouse, title: 'Hub', name: code ? hubName(code, stores) : 'From the address', sub: '', set: !!code, jump: 'sec-parties' })
+  })
+  stops.push({
+    key: 'to', icon: toIsAddress ? House : Warehouse, title: allDrops.length > 1 ? `Ship To · ${allDrops.length} addresses` : 'Ship To',
+    name: partyName(receiver), sub: allDrops.length > 1 ? `+ ${allDrops.length - 1} more` : placeOf(receiver),
+    set: filled(receiver.name) || filled(receiver.line1), jump: growLook ? 'sec-to' : 'sec-parties',
+  })
+  const LEG_ICON: Record<LegKind, typeof Truck> = { pickup: Bike, linehaul: Truck, delivery: Bike, pickAndDeliver: Zap }
+  const routeTimeline = (
+    <ol className="flex flex-col">
+      {stops.map((st, i) => {
+        const leg = i < stops.length - 1 ? legList2[i] : null
+        const Icon = st.icon
+        const LegIcon = leg ? LEG_ICON[leg] : null
+        return (
+          <li key={st.key} className="flex gap-3">
+            <div className="flex w-8 shrink-0 flex-col items-center">
+              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 ${st.set ? 'border-ink bg-surface text-ink' : 'border-dashed border-warm-300 text-warm-400'}`}>
+                <Icon size={15} strokeWidth={1.9} />
+              </span>
+              {leg && <span className="my-1 w-0 flex-1 border-l-2 border-dashed border-warm-300" />}
+            </div>
+            <div className={`min-w-0 flex-1 ${leg ? 'pb-3' : ''}`}>
+              {jumpBtn(st.jump, `Edit ${st.title}`, (
+                <>
+                  <p className="text-[12px] font-bold leading-4 text-ink-3">{st.title}</p>
+                  <p className={`truncate text-[14px] leading-5 ${st.name ? 'font-bold text-ink' : 'text-ink-3'}`}>{st.name || 'Not set yet'}</p>
+                  {st.sub && <p className="truncate text-[12px] leading-4 text-ink-3">{st.sub}</p>}
+                </>
+              ), '-mx-1 block w-full rounded-md px-1 py-0.5')}
+              {leg && LegIcon && (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full bg-brand-50 px-2 text-[12px] font-bold text-brand-600">
+                    <LegIcon size={13} strokeWidth={2} />Leg {i + 1} · {LEG_INFO[leg].name}
+                  </span>
+                  <span className="truncate text-[12px] text-ink-3" title={LEG_INFO[leg].hint}>{LEG_INFO[leg].rail}</span>
+                </div>
               )}
             </div>
-          )]
-        }), () => false, true, 'rows').nodes}
-        {sumLines.some((l) => l.foot) && (
-          <div className="border-t border-line pt-3">
-            {sumLines.filter((l) => l.foot).map((l) => (
-              <div key={l.key} className={`flex items-start gap-3 ${summaryCfg.hidden.includes(l.key) ? 'opacity-40' : ''}`}>
-                <div className="grid min-w-0 flex-1 grid-cols-[1fr_auto] items-baseline gap-x-6 gap-y-1 py-0.5 text-[13px] text-ink-2">
-                  {footRows(l.key).map(([k, v, strong], i) => (
-                    <Fragment key={i}>
-                      <span className={strong ? 'font-bold text-ink' : ''}>{k}</span>
-                      <span className={`text-right tabular-nums text-ink ${strong ? 'text-[15px] font-bold' : ''}`}>{v}</span>
-                    </Fragment>
-                  ))}
-                </div>
-                {editing && lineSwitch(l.key)}
-              </div>
-            ))}
+          </li>
+        )
+      })}
+    </ol>
+  )
+  const legCount = legList2.length
+  const activeHandling = [
+    ...GOODS_CATEGORIES.filter(({ name }) => categories.includes(name) && !isHidden(catKey(name)))
+      .map(({ name, icon }) => ({ key: name, icon, label: name, warn: name === 'Hazmat' || name === 'Fragile' })),
+    ...(c.scannable && !isHidden('scannable') ? [{ key: 'scan', icon: ScanBarcode, label: 'Barcode per box', warn: false }] : []),
+    ...(c.splittable && !isHidden('splittable') ? [{ key: 'split', icon: Split, label: 'Delivered in parts', warn: false }] : []),
+    ...(c.clearanceRequired && !isHidden('clearanceRequired') ? [{ key: 'clr', icon: ShieldCheck, label: 'Clearance', warn: false }] : []),
+    ...(c.schedulingConfirmation && !isHidden('schedulingConfirmation') ? [{ key: 'sch', icon: CalendarCheck, label: 'Scheduling confirmation', warn: false }] : []),
+  ]
+  const serviceName = merchantMode ? quote?.name ?? '' : isFtl ? consoleFtl : consoleService
+  const TaskIcon = ({ Forward: ArrowRight, Reverse: Undo2, Exchange: Repeat, Service: Wrench, Transfer: ArrowLeftRight } as Record<string, typeof Truck>)[ctype] ?? ArrowRight
+  const chip = (key: string, Icon: typeof Truck, text: string, tone: 'plain' | 'on' | 'warn' = 'plain', jump?: string | null) => (
+    <span key={key}>{jumpBtn(jump, text, (
+      <span className="inline-flex items-center gap-1.5 text-[13px] font-bold">
+        <Icon size={15} strokeWidth={1.9} className="shrink-0" />{text}
+      </span>
+    ), `inline-flex h-8 items-center rounded-lg border px-2.5 ${tone === 'warn' ? 'border-danger-fg/30 bg-danger-bg text-danger-fg'
+      : tone === 'on' ? 'border-brand-100 bg-brand-50 text-brand-600' : 'border-line bg-warm-50 text-ink'}`)}</span>
+  )
+  const stat = (key: string, Icon: typeof Truck, n: string | number, label: string, jump: string, dim = false) => (
+    <span key={key} className="min-w-0">{jumpBtn(jump, `${n} ${label}`, (
+      <span className="flex flex-col gap-0.5">
+        <span className="flex items-center gap-1.5">
+          <Icon size={16} strokeWidth={1.75} className={`shrink-0 ${dim ? 'text-warm-400' : 'text-ink-2'}`} />
+          <span className={`text-[15px] font-bold leading-5 tabular-nums ${dim ? 'text-ink-3' : 'text-ink'}`}>{n}</span>
+        </span>
+        <span className="block text-[12px] leading-4 text-ink-3">{label}</span>
+      </span>
+    ), 'block w-full rounded-lg bg-warm-50 px-2.5 py-2')}</span>
+  )
+  const infoRow = (key: string, Icon: typeof Truck, label: string, value: ReactNode, strong = false) => (
+    <div key={key} className="flex items-center gap-2.5 text-[13px]">
+      <Icon size={16} strokeWidth={1.9} className="shrink-0 text-ink-3" />
+      <span className="text-ink-2">{label}</span>
+      <span className={`ml-auto min-w-0 truncate text-right ${strong ? 'text-[15px] font-bold text-ink' : 'font-bold text-ink'}`}>{value}</span>
+    </div>
+  )
+  const sumHead: Record<string, ReactNode> = {
+    route: legCount ? <span className="text-[12px] text-ink-3">{plural(legCount, 'leg')}{movementType ? ` · ${MOVEMENT_LABEL[movementType]}` : ''}</span> : null,
+  }
+  const sumRow: Record<string, ReactNode> = {
+    route: routeTimeline,
+    task: (
+      <div className="flex flex-wrap gap-2">
+        {chip('type', TaskIcon, ctype, 'plain', 'sec-consignment')}
+        {chip('load', fullVehicle ? Truck : Boxes, fullVehicle ? 'Full vehicle' : 'Shared vehicle', 'plain', 'sec-consignment')}
+        {/* the task type (owner, 2026-10-28: "it is the task type"): one trip with no hub, or through a hub */}
+        {!isHidden('hubProcessing') && chip('task', RouteIcon, legsDirect ? 'Pick & deliver' : 'Through a hub', 'plain', 'sec-handling')}
+      </div>
+    ),
+    goods: (
+      <div className="grid grid-cols-3 gap-2">
+        {isFtl ? stat('veh', Truck, vehicles.length, vehicles.length === 1 ? 'vehicle' : 'vehicles', 'sec-vehicle')
+          : stat('pkg', Package, goodsPieces, goodsPieces === 1 ? 'package' : 'packages', 'sec-packages', !goodsPieces)}
+        {stat('sku', Boxes, skuUnits, skuUnits === 1 ? 'SKU' : 'SKUs', 'sec-packages', !skuUnits)}
+        {stat('vas', Sparkles, vasNames.length, 'VAS', 'sec-extras', !vasNames.length)}
+      </div>
+    ),
+    handling: activeHandling.length ? (
+      <div className="flex flex-wrap gap-2">{activeHandling.map((h) => chip(h.key, h.icon, h.label, h.warn ? 'warn' : 'on', 'sec-handling'))}</div>
+    ) : <p className="flex items-center gap-2 text-[13px] text-ink-3"><ShieldCheck size={15} className="shrink-0" />No special handling</p>,
+    service: (
+      <div className="grid gap-2">
+        {infoRow('svc', Zap, 'Service', serviceName || <span className="font-normal text-ink-3">Not chosen yet</span>)}
+        {infoRow('car', Truck, 'Carrier', (merchantMode ? (mode === 'ftl' ? '2GO Logistics' : '2GO Express') : c.carrier) || <span className="font-normal text-ink-3">Not chosen yet</span>)}
+        {infoRow('eta', Clock, 'ETA (est.)', etaDays != null ? plural(etaDays, 'day') : <span className="font-normal text-ink-3">—</span>)}
+        {merchantMode && infoRow('price', Banknote, quote ? 'Total, before tax' : 'From', quote ? money(quote.net, currency) : cheapest != null ? money(cheapest, currency) : '—', true)}
+      </div>
+    ),
+  }
+  /* Show on Ops / Show on Grow — the whole Summary and each row, per form (edited from the Ops form) */
+  const sumOn = (p: FormPortal) => draft.summary[p].enabled
+  const rowOn = (p: FormPortal, key: string) => !draft.summary[p].hidden.includes(key)
+  const setSum = (p: FormPortal, f: (x: FormSummary) => FormSummary) => setDraft((d) => ({ ...d, summary: { ...d.summary, [p]: f(d.summary[p]) } }))
+  const sumPills = (isOn: (p: FormPortal) => boolean, flip: (p: FormPortal, on: boolean) => void, what: string) => (
+    <span className="inline-flex shrink-0 items-center gap-1">
+      {(['console', 'grow'] as const).map((p) => {
+        const who = p === 'grow' ? 'Grow' : 'Ops'
+        const on = isOn(p)
+        return (
+          <Tip key={p} text={on ? `${what} shows on the ${who} form — click to hide it there` : `${what} is hidden on the ${who} form — click to show it`}>
+            <button type="button" aria-pressed={on} onClick={() => flip(p, !on)}
+              className={`inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px] font-bold transition-colors
+                ${on ? 'border-brand-200 bg-brand-50 text-brand-600' : 'border-line bg-surface text-ink-3 hover:text-ink'}`}>
+              {on ? <Eye size={11} /> : <EyeOff size={11} />}{who}
+            </button>
+          </Tip>
+        )
+      })}
+    </span>
+  )
+  /* a row hidden on both forms leaves the card while editing too (back, faded, with "Show hidden fields") */
+  const sumLines = summaryLinesOf(formPortal).filter((l) => (editing
+    ? showHidden || (['console', 'grow'] as const).some((p) => !draft.summary[p].hidden.includes(l.key))
+    : !summaryCfg.hidden.includes(l.key)))
+  const summarySection = (
+    <section id="sec-summary" aria-label={summaryTitle} className="rounded-xl bg-surface px-5 pb-5 pt-4">
+      <div className="flex items-center gap-2 pb-4">
+        <h2 className="min-w-0 flex-1 text-[15px] font-bold text-ink">{summaryTitle}</h2>
+        {editing && sumPills(sumOn, (p, on) => setSum(p, (x) => ({ ...x, enabled: on })), 'The Summary')}
+      </div>
+      <div className={`grid gap-4 [&>*+*]:border-t [&>*+*]:border-line [&>*+*]:pt-4 ${editing && !sumOn('console') && !sumOn('grow') ? 'opacity-50' : ''}`}>
+        {sumLines.map((l) => (
+          <div key={l.key} className={editing && !rowOn('console', l.key) && !rowOn('grow', l.key) ? 'opacity-50' : ''}>
+            <div className="mb-2.5 flex items-center gap-2">
+              <span className="shrink-0 text-[13px] font-bold text-ink">{l.label}</span>
+              <span className="min-w-0 flex-1 truncate text-right">{!editing && sumHead[l.key]}</span>
+              {editing && sumPills((p) => rowOn(p, l.key), (p, on) => setSum(p, (x) => ({ ...x, hidden: on ? x.hidden.filter((k) => k !== l.key) : [...x.hidden, l.key] })), l.label)}
+            </div>
+            {sumRow[l.key]}
           </div>
-        )}
+        ))}
       </div>
     </section>
   )
@@ -4419,7 +4833,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       <div className="overflow-x-auto">
         <div className="min-w-[900px]">
           <div className={`${SIMPLE_COLS} border-b border-warm-200 pb-2 text-[13px] text-ink-2`}>
-            <span>Package ID</span><span>Package Type</span><span>Quantity<span className="text-danger-fg"> *</span></span>
+            <span>Package ID</span><span>Package Type</span><span>Quantity<span className="req-star">*</span></span>
             <span>Tracking ID</span><span>SKU Code</span><span>SKU Name</span><span />
           </div>
           {parcels.map((p, i) => {
@@ -4462,15 +4876,17 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
 
   const byId: Record<string, ReactNode> = merchantMode ? {
     'sec-consignment': consignmentSection, 'sec-parties': partiesSection, 'sec-packages': packagesSection,
-    'sec-handling': merchantHandlingSection, 'sec-vehicle': growVehicleSection, 'sec-extras': merchantExtrasSection, 'sec-service': merchantServiceSection,
+    'sec-handling': growLook ? merchantHandlingSection : handlingInstrSection, 'sec-vehicle': growVehicleSection,
+    'sec-extras': merchantVasSection, 'sec-svctype': merchantServiceSection,
+    'sec-to': merchantToSection, 'sec-pay': growPaySection,
     'sec-payment': paymentSection,
     'sec-summary': summarySection,
   } : simple ? {
     'sec-consignment': simpleConsignment, 'sec-parties': simpleParties, 'sec-packages': simplePackages,
     'sec-vehicle': vehicleSection, 'sec-carrier': carrierSection,
   } : {
-    'sec-consignment': consignmentSection, 'sec-parties': partiesSection, 'sec-packages': packagesSection, 'sec-handling': handlingSection,
-    'sec-vehicle': vehicleSection, 'sec-service': serviceSection, 'sec-carrier': carrierSection, 'sec-summary': summarySection,
+    'sec-consignment': consignmentSection, 'sec-parties': partiesSection, 'sec-packages': packagesSection, 'sec-handling': handlingInstrSection,
+    'sec-vehicle': vehicleSection, 'sec-extras': merchantVasSection, 'sec-svctype': consoleSvcTypeSection, 'sec-carrier': carrierSection, 'sec-summary': summarySection,
   }
 
   /* owner, 2026-09-29: a back chevron beside the title (PageHeader's back button) + the one-line subtitle */
@@ -4482,26 +4898,101 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     </button></Tip>
   )
   const SUBTITLE = 'Provide the order details to ensure accurate processing, routing, and billing of the shipment.'
-  /* the builder's two forms — the console's, and the Grow portal's (the merchant form, previewed here) */
-  const changedForGrow = growSetup ? Object.keys(draftRules).length : 0
-  /* a segment (CLAUDE.md: border-ink + bg-warm-50 for the chosen one), the explanation in a tooltip */
+  const customKeys = (card: CustomFieldCard) => customDefs.filter((d) => d.card === card).map((d) => d.key)
+  /* every field the builder can change, by the card it sits in — on either form (All fields has a switch per form) */
+  const fieldGroups = [
+    { id: 'sec-consignment', title: 'Consignment details', keys: ['merchant', 'orderNumber', 'referenceNumber', 'consignmentNumber', 'consignmentType',
+      'shipByDate', 'exchangeOrderNumber', 'dedicateTruck', ...(merchantMode ? ['orderAmount'] : ['paymentMode', 'orderAmount']), ...customKeys('sec-consignment')] },
+    { id: 'addresses', title: 'Addresses', keys: ['addrName', 'addrCompanyName', 'addrContact', 'addrEmail', 'addrLine1', 'addrLines23', 'addrLandmark',
+      'addrCountry', 'addrPostal', 'addrSuburb', 'addrCity', 'addrState', 'addrCoordinates', 'addrFloorLift', 'addrLift', 'addrWindow', 'schedulingConfirmation'] },
+    { id: 'sec-packages', title: 'Package & SKU', keys: [PKG_SECTION, SKU_SECTION, 'pkgType', 'pkgQty', 'pkgWeight', 'pkgDimensions', 'pkgTracking', 'pkgId', 'pkgDescription',
+      'pkgPalletSpace', 'skuWeight', 'skuDimensions', 'skuCategory', 'skuDescription', 'skuHsn', 'skuOrigin', 'skuUnitCost', 'skuImage'] },
+    { id: 'sec-handling', title: 'Handling & Instructions', keys: [...GOODS_CATEGORIES.map(({ name }) => catKey(name)), 'scannable', 'splittable', 'clearanceRequired',
+      'tags', 'hubProcessing', 'vehicleDetails', 'labelFormat', 'totalLoadingTime', 'specialInstructions',
+      ...customKeys('sec-handling'), ...customKeys('sec-service')] },
+    { id: 'sec-extras', title: 'Value Added Services', keys: ['vas', 'vasTime', 'vasRemark'] },
+    { id: 'sec-svctype', title: 'Service Type', keys: ['serviceType'] },
+    { id: 'sec-carrier', title: 'Carriers', keys: ['carrier'] },
+  ].map((g) => ({ ...g, keys: g.keys.filter((k) => known(k) && !(MERCHANT_OFF.has(k) && CONSOLE_OFF.has(k))) }))
+  /* a whole card shown or hidden per form (owner, 2026-10-28: "show / hide section also, for Grow and Ops") = its fields'
+     Show for Ops / Show for Grow at once. Offered only on a card whose every field can be hidden (Handling, Service &
+     instructions) — a card holding a field the system needs cannot go. A hidden field is never required, so a hidden card
+     never blocks an order. */
+  const groupKeysOf = (id: string) => fieldGroups.find((g) => g.id === (id === 'sec-parties' ? 'addresses' : id))?.keys ?? []
+  const cardKeysOn = (id: string, p: FormPortal) => groupKeysOf(id).filter((k) => !offOn(p).has(k))
+  /* owner, 2026-10-28 ("hide an entire section — unless a field in it is required"): every card with builder fields offers it;
+     a card holding a required field (or one the system needs) cannot be hidden until that field is optional */
+  const cardHideable = (id: string) => (['console', 'grow'] as const).some((p) => cardKeysOn(id, p).length > 0)
+  const cardBlock = (id: string, p: FormPortal): string | null => {
+    const req = cardKeysOn(id, p).find((k) => !hiddenOn(k, p) && (!!lockOn(k) || (requirable(k) && (rulesOf(p)[k]?.required ?? DEFAULT_REQUIRED.has(k)))))
+    return req ? `${fieldName(req)} is required — make it optional to hide this card` : null
+  }
+  const cardShownOn = (id: string, p: FormPortal) => cardKeysOn(id, p).some((k) => !hiddenOn(k, p))
+  const setCardShown = (id: string, p: FormPortal, on: boolean) => setDraft((d) => {
+    const side = p === 'grow' ? 'grow' : 'con'
+    const r = { ...d[side] }
+    for (const k of cardKeysOn(id, p)) r[k] = { ...r[k], hidden: !on }
+    return { ...d, [side]: r }
+  })
+  /** the card's two show switches — on its top edge while editing, and on its row in All fields */
+  const cardShowTools = (id: string, title: string) => (
+    <span className="inline-flex items-center gap-1">
+      {(['console', 'grow'] as const).map((p) => {
+        const who = p === 'grow' ? 'Grow' : 'Ops'
+        const on = cardShownOn(id, p)
+        const block = on ? cardBlock(id, p) : null
+        return (
+          <Tip key={p} text={block ?? (on ? `${title} shows on the ${who} form — click to hide the whole card there` : `${title} is hidden on the ${who} form — click to show it`)}>
+            <button type="button" aria-pressed={on} aria-label={`${on ? 'Hide' : 'Show'} ${title} for ${who}`} disabled={!!block}
+              onClick={(e) => { e.stopPropagation(); setCardShown(id, p, !on) }}
+              className={`inline-flex h-[22px] items-center gap-1 rounded-full border px-2 text-[11px] font-bold shadow-ds-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50
+                ${on ? 'border-brand-200 bg-brand-50 text-brand-600' : 'border-line bg-surface text-ink-3 hover:text-ink'}`}>
+              {on ? <Eye size={11} /> : <EyeOff size={11} />}{who}
+            </button>
+          </Tip>
+        )
+      })}
+    </span>
+  )
+  /* ONE builder (owner, 2026-10-28): edited on the Ops form; Preview shows either form with the working copy */
+  const formName = merchantMode ? 'Grow' : 'Ops'
+  const seg = (on: boolean) => `inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] transition-colors
+    ${on ? 'border-ink bg-warm-50 font-bold text-ink' : 'border-transparent text-ink-2 hover:bg-warm-50'}`
+  /* Preview only: which form it shows */
   const portalSwitch = (
-    <div role="radiogroup" aria-label="Which form" className="inline-flex shrink-0 gap-1 rounded-lg border border-line bg-surface p-1">
-      {([
-        ['console', 'Operations form', Monitor, 'What ops see on Add Consignment'],
-        ['grow', 'Merchant form', Store, 'What merchants see on Create Order'],
-      ] as const).map(([p, label, Icon, hint]) => (
-        <Tip key={p} text={hint}>
-          <button type="button" role="radio" aria-checked={formPortal === p} onClick={() => switchPortal(p)}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3.5 text-[13px] transition-colors
-              ${formPortal === p ? 'border-ink bg-warm-50 font-bold text-ink' : 'border-transparent text-ink-2 hover:bg-warm-50'}`}>
-            <Icon size={14} />{label}
-          </button>
-        </Tip>
+    <div role="radiogroup" aria-label="Which form the preview shows" className="inline-flex shrink-0 gap-1 rounded-lg border border-line bg-surface p-1">
+      {([['console', 'Ops form', Monitor, 'What ops see on Add Consignment'], ['grow', 'Grow form', Store, 'What merchants see on Grow Create Order']] as const)
+        .map(([p, label, Icon, hint]) => (
+          <Tip key={p} text={hint}>
+            <button type="button" role="radio" aria-checked={formPortal === p} onClick={() => switchPortal(p)} className={seg(formPortal === p)}>
+              <Icon size={14} />{label}
+            </button>
+          </Tip>
+        ))}
+    </div>
+  )
+  /* Edit (click a field to change it — on the Ops form) | Preview (the form exactly as people see it, nothing is created) */
+  const modeSwitch = (
+    <div role="radiogroup" aria-label="Edit or preview" className="inline-flex shrink-0 gap-1 rounded-lg border border-line bg-surface p-1">
+      {([[false, 'Edit', SlidersHorizontal], [true, 'Preview', Eye]] as const).map(([pv, label, Icon]) => (
+        <button key={label} type="button" role="radio" aria-checked={previewing === pv} className={seg(previewing === pv)}
+          onClick={() => {
+            if (!pv && merchantMode) { switchPortal('console', false); return }
+            setPreviewing(pv); setSelKey(null); setAllOpen(false); setCardOpts(null); if (!pv) setShowErrors(false)
+          }}>
+          <Icon size={14} />{label}
+        </button>
       ))}
     </div>
   )
-  const builderBar = merchantMode && !editing ? (
+  const checkForm = () => {
+    setShowErrors(true)
+    const first = orderedSections.find((sec) => !doneOf[sec])
+    if (first) jumpTo(first)
+    else toast.success(`Every required field is filled — the ${formName} form would go through`)
+  }
+  const resetForm = () => setDraft((d) => ({ ...d, con: {}, layout: { ...d.layout, console: DEFAULT_LAYOUT }, order: {}, summary: { ...d.summary, console: DEFAULT_SUMMARY.console } }))
+  const builderBar = merchantMode && !building ? (
     <>
       <div className="mb-4 flex items-start gap-3">
         {backBtn}
@@ -4510,55 +5001,36 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           <p className="text-[13px] text-ink-2">{SUBTITLE}</p>
         </div>
       </div>
-      {/* owner, 2026-10-06: two steps — this form, then the service + the payment at checkout (step 2 = Continue) */}
-      <WizardSteps steps={ORDER_STEPS} active={0} onSelect={(i) => { if (i === 1) proceed() }} />
     </>
-  ) : editing ? (
-    /* the editing bar (owner, 2026-10-05: "needs a better UI") — two rows in one card: what is being edited and how to
-       finish it (Cancel / Save) above; which form, and the tools for the whole form, below. Row 2 rounds its own bottom
-       corners instead of the card clipping (overflow-hidden would cut off the ⓘ legend that opens over the card's edge). */
-    <div className="sticky top-0 z-40 mb-6 rounded-xl border border-line bg-surface shadow-ds-1">
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4">
-        <div className="flex min-w-0 flex-[1_1_360px] items-center gap-3">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-500">
-            <SlidersHorizontal size={18} />
-          </span>
-          <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-[15px] font-bold text-ink">
-              {growSetup ? 'Editing the merchant form' : 'Editing the operations form'}
-              <InfoTip text="Click a field to open its settings, or use the small icons on it: ✱ required · ☰ under More · .* what can be typed · eye show / hide. A lit icon = set; a lock = needed by the system. Move card moves a whole card up or down; drag a field to move it inside its card. All fields lists everything, hidden ones too." />
-            </p>
-            <p className="text-[13px] text-ink-2">
-              {growSetup
-                ? 'What merchants see on Create Order. It follows the operations form — changes here are for merchants only.'
-                : 'What ops see on Add Consignment. Grow follows it, unless Grow has its own setting.'}
-            </p>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-3">
-          {dirty && <span className="text-[12px] text-ink-3">Unsaved changes</span>}
-          <Button variant="outline" onClick={cancelEditing}>Cancel</Button>
-          <Button disabled={!dirty} onClick={() => saveEditing()}>Save changes</Button>
-        </div>
+  ) : building ? (
+    /* the builder's bar (owner, 2026-10-28: "merge, simplify the header") — ONE row: the name with its ⓘ, Edit | Preview, the
+       tools of that mode, and Cancel / Save at the end */
+    <div className="sticky top-0 z-40 mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-line bg-surface px-5 py-3 shadow-ds-1">
+      <p className="flex shrink-0 items-center gap-1.5 text-[15px] font-bold text-ink">
+        <SlidersHorizontal size={16} className="text-brand-500" />Form builder
+        <InfoTip text={previewing
+          ? `Preview: exactly what ${merchantMode ? 'merchants see on Grow Create Order' : 'ops see on Add Consignment'}, with your unsaved changes. Fill it in to try it — nothing is created or saved.`
+          : 'One builder for the Ops and the Grow form. Click a field to open its settings, or use the small icons on it: ✱ required · ☰ under More · eye show / hide. Name, Required, More, width and explainer apply to both forms; each field has its own Show for Ops and Show for Grow. Preview shows either form as people see it.'} />
+      </p>
+      {modeSwitch}
+      {previewing && portalSwitch}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        {previewing
+          ? <Button variant="outline" size="sm" icon={<ListChecks size={14} />} onClick={checkForm}>Check required fields</Button>
+          : <>
+              <Button variant="outline" size="sm" icon={<ListChecks size={14} />} onClick={() => showFieldGroup(null)}>All fields</Button>
+              <Tip text="Hidden fields stay in the form, faded, so you can bring them back">
+                <InlineSwitch label="Show hidden fields" checked={showHidden} onChange={setShowHidden} />
+              </Tip>
+              <Tip text="Every field setting, Show for Ops, the field order and the Ops display options back to the start (Show for Grow is kept)">
+                <Button variant="ghost" size="sm" icon={<RotateCcw size={13} />} onClick={resetForm}>Reset to default</Button>
+              </Tip>
+            </>}
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-b-xl border-t border-line bg-warm-50 px-5 py-2.5">
-        {portalSwitch}
-        {growSetup && changedForGrow > 0 && (
-          <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-[12px] font-bold text-brand-600">{changedForGrow} changed for Grow</span>
-        )}
-        <div className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-2">
-          <Button variant="outline" size="sm" icon={<ListChecks size={14} />} onClick={() => showFieldGroup(null)}>All fields</Button>
-          <Tip text="Hidden fields stay in this preview, faded, so you can bring them back">
-            <InlineSwitch label="Show hidden fields" checked={showHidden} onChange={setShowHidden} />
-          </Tip>
-          {growSetup
-            ? <Button variant="ghost" size="sm" icon={<RotateCcw size={13} />}
-                disabled={changedForGrow === 0 && JSON.stringify(draftLayout) === JSON.stringify(loadLayout('console'))
-                  && JSON.stringify(draftOrder) === JSON.stringify(loadOrder('console'))}
-                onClick={() => { setDraftRules({}); setDraftLayout(loadLayout('console')); setDraftOrder(loadOrder('console')) }}>Match operations form</Button>
-            : <Button variant="ghost" size="sm" icon={<RotateCcw size={13} />}
-                onClick={() => { setDraftRules({}); setDraftLayout(DEFAULT_LAYOUT); setDraftOrder({}); setDraftSummary(DEFAULT_SUMMARY.console) }}>Reset to default</Button>}
-        </div>
+      <div className="ml-auto flex shrink-0 items-center gap-3">
+        {dirty && <span className="text-[12px] text-ink-3">Unsaved changes</span>}
+        <Button variant="outline" onClick={cancelEditing}>Cancel</Button>
+        <Button disabled={!dirty} onClick={saveEditing}>Save changes</Button>
       </div>
     </div>
   ) : (
@@ -4575,7 +5047,8 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       {/* owner, 2026-09-29: no old-form link, no change count, no simplified-form note — just the builder entry */}
       {!simple && (
         <div className="flex items-center gap-2">
-          <Button variant="outline" icon={<SlidersHorizontal size={14} />} onClick={startEditing}>Edit consignment form</Button>
+          {/* owner, 2026-10-27: "Form builder", with the builder's own icon */}
+          <Button variant="outline" icon={<LayoutTemplate size={14} />} onClick={startEditing}>Form builder</Button>
         </div>
       )}
     </div>
@@ -4593,22 +5066,9 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     window.addEventListener('keydown', esc)
     return () => window.removeEventListener('keydown', esc)
   }, [editing])
-  const customKeys = (card: CustomFieldCard) => customDefs.filter((d) => d.card === card).map((d) => d.key)
-  /* every field the builder can change, by the card it sits in (a field this form never has is left out) */
-  const fieldGroups = [
-    { id: 'sec-consignment', title: 'Consignment details', keys: ['merchant', 'orderNumber', 'referenceNumber', 'consignmentNumber', 'consignmentType',
-      'shipByDate', 'exchangeOrderNumber', ...(merchantMode ? [] : ['paymentMode', 'orderAmount']), ...customKeys('sec-consignment')] },
-    { id: 'addresses', title: 'Addresses', keys: ['addrName', 'addrCompanyName', 'addrContact', 'addrEmail', 'addrLine1', 'addrLines23', 'addrLandmark',
-      'addrCountry', 'addrPostal', 'addrSuburb', 'addrCity', 'addrState', 'addrCoordinates', 'addrFloorLift', 'addrLift', 'addrWindow', 'schedulingConfirmation'] },
-    { id: 'sec-packages', title: 'Package & SKU', keys: [PKG_SECTION, SKU_SECTION, 'pkgType', 'pkgQty', 'pkgWeight', 'pkgDimensions', 'pkgTracking', 'pkgId', 'pkgDescription',
-      'pkgPalletSpace', 'skuWeight', 'skuDimensions', 'skuCategory', 'skuDescription', 'skuHsn', 'skuOrigin', 'skuUnitCost', 'skuImage'] },
-    { id: 'sec-handling', title: 'Handling', keys: [...GOODS_CATEGORIES.map(({ name }) => catKey(name)), 'scannable', 'splittable', 'clearanceRequired',
-      'tags', ...(merchantMode ? ['dedicateTruck', 'vehicleDetails'] : []), ...customKeys('sec-handling')] },
-    { id: 'sec-service', title: 'Service & instructions', keys: ['serviceType', ...(merchantMode ? [] : ['dedicateTruck', 'vehicleType', 'vehicleDetails']),
-      'labelFormat', 'totalLoadingTime', 'specialInstructions', 'vas', ...customKeys('sec-service')] },
-  ].map((g) => ({ ...g, keys: g.keys.filter((k) => known(k) && !(merchantMode ? MERCHANT_OFF : CONSOLE_OFF).has(k)) }))
   /** a field's name as the form shows it */
-  const fieldName = (k: string) => (k === 'dedicateTruck' ? custom('dedicateTruck', 'Dedicate Truck', 'Load type')
+  const fieldName = (k: string) => (k.startsWith('card:') ? `${SECTION_TITLES[k.slice(5)] ?? 'Card'} — info`
+    : k === 'dedicateTruck' ? custom('dedicateTruck', 'Dedicate Truck', 'Load type')
     : k === 'scannable' ? custom('scannable', 'Scannable', 'Barcode on every box')
     : k === 'splittable' ? 'Can be delivered in parts' : lbl(k))
   const groupOf = (k: string) => fieldGroups.find((g) => g.keys.includes(k))?.title ?? ''
@@ -4620,7 +5080,10 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   }
   const toggleGroup = (id: string) => setOpenGroups((st) => { const n = new Set(st); if (n.has(id)) n.delete(id); else n.add(id); return n })
   const needle = allQuery.trim().toLowerCase()
-  const verb = merchantMode || growSetup ? 'the order can go to checkout' : 'the consignment can be added'
+  const verb = merchantMode ? 'the order can go to checkout' : 'the consignment can be added'
+  /** the Required setting itself (shared) — whether or not the previewed form shows the field */
+  const reqSet = (k: string) => requirable(k) && (rules[k]?.required ?? DEFAULT_REQUIRED.has(k))
+  const offBoth = (k: string) => hiddenOn(k, 'console') && hiddenOn(k, 'grow')
   /** settings only one field has (Service Type: the service used while it is hidden) */
   const fieldExtra = (k: string): ReactNode => {
     /* Dedicate Truck (2026-10-07): what a hidden switch gives every consignment */
@@ -4637,9 +5100,10 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     )
     if (k !== 'serviceType') return null
     /* the console offers the static list; the Grow form books from the Service Type master's Active rows */
-    const list = growSetup || merchantMode ? services.map((x) => x.code) : SERVICE_TYPES
+    const list = merchantMode ? services.map((x) => x.code) : SERVICE_TYPES
     const name = (code: string) => services.find((x) => x.code === code)?.name ?? code
-    const cur = list.includes(ruleDefault) ? ruleDefault : growSetup || merchantMode ? (services[0]?.code ?? '') : defaultService
+    const cur = list.includes(ruleDefault) ? ruleDefault : merchantMode ? (services[0]?.code ?? '') : defaultService
+    const growSvcDefault = draft.grow.serviceType?.defaultValue?.trim() ?? ''
     return (
       <div>
         <PanelHeading>While it is hidden</PanelHeading>
@@ -4648,36 +5112,70 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
             onChange={(v) => setRule('serviceType', { defaultValue: v })} />
         </SFld>
         <p className="mt-2 text-[12px] text-ink-3">
-          {growSetup || merchantMode
+          {merchantMode
             ? 'Merchants are not asked — the order is priced with this service. A full vehicle still picks its vehicles.'
             : `Nobody is asked. A full-vehicle consignment uses ${FTL_SERVICE_CODES.includes(cur) ? cur : DEFAULT_FTL_SERVICE} unless this is a vehicle service. A saved draft keeps its own service.`}
         </p>
+        {/* Grow's own Service Type (owner, 2026-10-28: the one setting Grow does not take from the Ops form) */}
+        {!merchantMode && (
+          <div className="mt-8">
+            <PanelHeading>On the Grow form</PanelHeading>
+            <div className="grid gap-5">
+              <SFld label="Services show as">
+                <LayoutSeg label="" value={draft.layout.grow.services === 'menu' ? 'menu' : 'grid'}
+                  onChange={(v) => setLayoutOf('grow', (l) => ({ ...l, services: v }))} options={[
+                    { value: 'grid', label: 'Cards', tip: 'One full-width card per service — radio, name, carrier, rate' },
+                    { value: 'menu', label: 'Dropdown', tip: 'One compact dropdown — the shortest step' },
+                  ]} />
+              </SFld>
+              <SFld label="Service every order gets while it is hidden for Grow">
+                <MenuSelect value={services.some((x) => x.code === growSvcDefault) ? growSvcDefault : (services[0]?.code ?? '')}
+                  options={services.map((x) => x.code)} labels={name} searchable={services.length > 8}
+                  onChange={(v) => setDraft((d) => ({ ...d, grow: { ...d.grow, serviceType: { ...d.grow.serviceType, defaultValue: v } } }))} />
+              </SFld>
+            </div>
+            <p className="mt-2 text-[12px] text-ink-3">Merchants pick a service from priced cards; hidden, the order is priced with this one.</p>
+          </div>
+        )}
       </div>
     )
   }
-  /** move a field one place earlier / later in its zone (the keyboard way to do what dragging does) — read off the
-      screen, so it moves among the fields as they stand */
-  const nudge = (k: string, dir: -1 | 1) => {
-    const cell = fieldEl(k)?.closest<HTMLElement>('[data-sort-id]')
-    const zone = cell?.dataset.sortZone
-    if (!cell || !zone) return
-    const ids = zoneIds(cell, zone)
-    const i = ids.indexOf(cell.dataset.sortId!)
-    const j = i + dir
-    if (i < 0 || j < 0 || j >= ids.length) return
-    setDraftOrder((o) => ({ ...o, [zone]: moveId(ids, ids[i], ids[j], dir > 0) }))
-    window.setTimeout(() => fieldEl(k)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 30)
+  /** a card's ⓘ (owner, 2026-10-28): its text, or none — shared by both forms */
+  const cardInfoSettings = (k: string) => {
+    const own = fieldEl(k)?.getAttribute('data-default-tip') ?? ''
+    const r = rules[k]
+    return (
+      <BuilderCtx.Provider value={null}>
+      <div className="grid gap-6">
+        <div className="divide-y divide-line rounded-lg border border-line">
+          <SettingRow title="Show the ⓘ" checked={!r?.noTip} onChange={(on) => setRule(k, { noTip: on ? undefined : true })}
+            hint={r?.noTip ? 'The card shows no ⓘ.' : 'People see it when they point at the ⓘ.'} />
+          <div className="px-4 py-3">
+            <p className="text-[13px] text-ink-3">Text — empty = the card’s own{own ? `: “${own}”` : ''}</p>
+            <textarea rows={3} maxLength={150} value={r?.tooltip ?? ''} placeholder={own || 'eg, Who it is for and how it is identified'}
+              disabled={!!r?.noTip} onChange={(e) => setRule(k, { tooltip: e.target.value })} className={`mt-2 ${TEXTAREA} disabled:opacity-50`} />
+            <p className="mt-1 text-right text-[12px] text-ink-3">{(r?.tooltip ?? '').length}/150</p>
+          </div>
+        </div>
+        {(r?.tooltip || r?.noTip) && (
+          <Button variant="ghost" size="sm" icon={<RotateCcw size={13} />}
+            onClick={() => setRule(k, { tooltip: undefined, noTip: undefined })}>Use the card’s own text</Button>
+        )}
+      </div>
+      </BuilderCtx.Provider>
+    )
   }
   /** one field's settings — the same body in the card beside the field and in All fields */
   const fieldSettings = (k: string, close: () => void) => {
+    if (k.startsWith('card:')) return cardInfoSettings(k)
     const lock = lockOf(k)
-    const parent = hiddenWith(k)
-    const own = ownHidden(k)
     const cdef = customOf(k)
     const renamable = !GROUP_KEYS.has(k) && !GOODS_SECTIONS.has(k) && k !== 'splittable' && k !== 'vas'
     return (
       <BuilderCtx.Provider value={null}>
-      <div className="grid gap-8">
+      {/* two balanced columns when there is room (the popup); one in All fields' narrow pane */}
+      <div className="@container">
+      <div className="grid gap-5 @min-[560px]:block @min-[560px]:columns-2 @min-[560px]:gap-6 @min-[560px]:[&>*]:mb-5 @min-[560px]:[&>*]:break-inside-avoid">
         {lock && (
           <p className="flex items-start gap-2 rounded-lg bg-warm-50 px-3 py-2.5 text-[12px] text-ink-2">
             <Lock size={13} className="mt-0.5 shrink-0 text-ink-3" />
@@ -4692,60 +5190,72 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
         )}
         {!lock && (
           <div className="divide-y divide-line rounded-lg border border-line">
-            <SettingRow title="Show on the form" checked={!own && !parent} disabled={!!parent} onChange={(on) => setRule(k, { hidden: !on })}
-              hint={parent ? `Hidden because ${fieldName(parent)} is hidden.` : own
-                ? (k === 'serviceType' ? 'Hidden — every consignment gets the service below.'
-                  : k === 'dedicateTruck' ? 'Hidden — every consignment gets the load type below.'
-                  : k === 'vehicleDetails' ? 'Hidden — the carrier picks the vehicle for a dedicated truck.'
-                  : k === 'referenceNumber' ? `Hidden — it copies the ${lbl('orderNumber')}.`
-                  : k === 'consignmentType' ? 'Hidden — every consignment is Forward.'
-                  : k === 'shipByDate' ? 'Hidden — every consignment ships by the day it is created.'
-                  : k === 'paymentMode' ? 'Hidden — every order is Prepaid.'
-                  : k === 'merchant' ? 'Hidden — the signed-in merchant is recorded.'
-                  : k === PKG_SECTION ? 'Hidden — people enter SKUs and how many; the packages are worked out.'
-                  : k === SKU_SECTION ? 'Hidden — people enter packages only.'
-                  : 'Hidden — people do not see it. Saved consignments keep their answer.')
-                : 'People see it on this form.'} />
+            {(['console', 'grow'] as const).map((p) => {
+              const usual = offOn(p).has(k)
+              const par = hiddenWithOn(k, p)
+              const off = ownHiddenOn(k, p)
+              const plock = lockOn(k)
+              return (
+                <SettingRow key={p} title={p === 'grow' ? 'Show for Grow' : 'Show for Ops'}
+                  checked={!off} disabled={!!plock} onChange={(on) => setShown(k, p, on)}
+                  hint={plock === 'last' ? 'Packages or SKUs must show — show the other one first to hide this.'
+                    : par && !off ? `On — it shows once ${fieldName(par)} shows on this form.`
+                    : usual && !off ? (p === 'grow' ? 'Merchants see it — normally the carrier or ops set it.' : 'Ops see it — normally only merchants are asked.')
+                    : usual && off ? (p === 'grow' ? 'Off by default — the carrier or ops set it. Switch on to ask merchants.' : 'Off by default — only merchants are asked. Switch on to ask ops.')
+                    : off
+                    ? (k === 'serviceType' ? 'Hidden — every consignment gets the service set for this form.'
+                      : k === 'dedicateTruck' ? 'Hidden — every consignment gets the load type below.'
+                      : k === 'vehicleDetails' ? 'Hidden — the carrier picks the vehicle for a dedicated truck.'
+                      : k === 'referenceNumber' ? `Hidden — it copies the ${lbl('orderNumber')}.`
+                      : k === 'consignmentType' ? 'Hidden — every consignment is Forward.'
+                      : k === 'shipByDate' ? 'Hidden — every consignment ships by the day it is created.'
+                      : k === 'paymentMode' ? 'Hidden — every order is Prepaid.'
+                      : k === 'merchant' ? 'Hidden — the signed-in merchant is recorded.'
+                      : k === PKG_SECTION ? 'Hidden — people enter SKUs and how many; the packages are worked out.'
+                      : k === SKU_SECTION ? 'Hidden — people enter packages only.'
+                      : 'Hidden — saved consignments keep their answer.')
+                    : p === 'grow' ? 'Merchants see it on Create Order.' : 'Ops see it on Add Consignment.'} />
+              )
+            })}
             {requirable(k) && (
-              <SettingRow title="Required" checked={need(k)} disabled={own || !!parent} onChange={(on) => setRule(k, { required: on })}
-                hint={`It must be filled before ${verb}.`} />
+              <SettingRow title="Required" checked={reqSet(k)} disabled={offBoth(k)} onChange={(on) => setRule(k, { required: on })}
+                hint={merchantMode && GROW_OWN_KEYS.has(k) ? `On the Grow form, it must be filled before ${verb}.`
+                  : 'On both forms — wherever it shows, it must be filled.'} />
             )}
             {movable(k) && (
-              <SettingRow title="Put under “More”" checked={inMore(k)} disabled={own || !!parent || need(k)} onChange={(on) => setRule(k, { more: on })}
-                hint={need(k) ? 'A required field always stays in the main form.'
+              <SettingRow title="Put under “More”" checked={inMore(k)} disabled={offBoth(k) || reqSet(k) || (growLook && GROW_FIXED_PLACE.has(k))} onChange={(on) => setRule(k, { more: on })}
+                hint={reqSet(k) ? 'A required field always stays in the main form.'
+                  : growLook && GROW_FIXED_PLACE.has(k) ? 'The Grow form keeps it in its own place (its SKU table) — set this on the Ops form.'
                   : SKU_ROW_KEYS.has(k) ? 'It shows only when someone opens a SKU line’s details (the chevron at its end).'
                   : 'It shows only when someone clicks More in this section.'} />
             )}
           </div>
         )}
         {fieldExtra(k)}
-        {(widthable(k) || !GOODS_SECTIONS.has(k)) && (
+        {/* owner, 2026-10-28: no Position row (a field is dragged in the form); the explainer is one plain field */}
+        {(widthable(k) || textField(k)) && (
           <div className="divide-y divide-line rounded-lg border border-line">
             {widthable(k) && (
               <SettingRow title="Width" hint="How much of its row it takes."
-                control={<LayoutSeg label="" value={rules[k]?.width ?? 's'} onChange={(v) => setRule(k, { width: v })} options={FIELD_WIDTHS} />} />
+                control={<LayoutSeg label="" value={rules[k]?.width ?? DEFAULT_WIDTH[k] ?? 'm'} onChange={(v) => setRule(k, { width: v === (DEFAULT_WIDTH[k] ?? 'm') ? undefined : v })} options={FIELD_WIDTHS} />} />
             )}
-            {!GOODS_SECTIONS.has(k) && (
-              <SettingRow title="Position" hint="Drag it in the form, or move it one place."
-                control={(
-                  <span className="inline-flex gap-2">
-                    <Button variant="outline" size="sm" icon={<ChevronLeft size={14} />} onClick={() => nudge(k, -1)}>Earlier</Button>
-                    <Button variant="outline" size="sm" icon={<ChevronRight size={14} />} onClick={() => nudge(k, 1)}>Later</Button>
-                  </span>
-                )} />
+            {textField(k) && (
+              <SettingRow title="Character limit" hint="Blank for no limit."
+                control={<div className="w-24"><NumBox integer blankZero min={0} value={rules[k]?.maxLength ?? 0}
+                  onChange={(n) => setRule(k, { maxLength: n > 0 ? Math.min(500, n) : undefined })} /></div>} />
             )}
           </div>
+        )}
+        {!GOODS_SECTIONS.has(k) && (
+          <SFld label="Explainer (ⓘ beside the name)">
+            <Input value={rules[k]?.tooltip ?? ''} placeholder="eg, The number on the merchant's invoice"
+              onChange={(v) => setRule(k, { tooltip: v.slice(0, 150) })} />
+          </SFld>
         )}
         {formatable(k) && (
           <div>
             <PanelHeading>What can be typed</PanelHeading>
             <FormatEditor key={k} value={fmtOf(k)} onChange={(f) => setRule(k, { format: f })} />
-          </div>
-        )}
-        {growSetup && !!draftRules[k] && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-brand-50 px-3 py-2.5">
-            <span className="text-[12px] font-bold text-brand-600">Changed for Grow</span>
-            <Button variant="ghost" size="sm" icon={<RotateCcw size={13} />} onClick={() => setDraftRules((r) => withoutKeys(r, [k]))}>Use the operations setting</Button>
           </div>
         )}
         {cdef && (
@@ -4756,6 +5266,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
             <Button variant="ghost" size="sm" icon={<Trash2 size={13} />} onClick={() => { removeCustom(k); close() }}>Remove field</Button>
           </div>
         )}
+      </div>
       </div>
       </BuilderCtx.Provider>
     )
@@ -4785,7 +5296,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
   /* All fields — every field by card, a show / hide switch on each, the picked one's settings beside the list */
   const allFieldsDialog = (
     <Modal open={editing && allOpen} wide title="All fields"
-      subtitle={`Every field on the ${growSetup ? 'merchant' : 'operations'} form. Switch one off to hide it, or click its name to change more.`}
+      subtitle="Every field on both forms. Ops and Grow switch it on or off on each form; click its name for the rest — those settings apply to both." 
       onClose={() => setAllOpen(false)}
       footer={<>
         <span className="mr-auto"><AddRowLink label="Add field" onClick={() => setAddCard(null)} /></span>
@@ -4812,6 +5323,11 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
                       {[reqN ? `${reqN} required` : '', hiddenN ? `${hiddenN} hidden` : ''].filter(Boolean).join(' · ')}
                     </span>
                   </button>
+                  {cardHideable(g.id) && (
+                    <div className="flex items-center justify-end gap-2 pb-2 pr-1">
+                      <span className="text-[12px] text-ink-3">Whole card</span>{cardShowTools(g.id, g.title)}
+                    </div>
+                  )}
                   {open && (
                     <ul className="pb-2">
                       {keys.map((k) => (
@@ -4822,10 +5338,17 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
                             {(need(k) || lockOf(k) === 'system') && <span className="shrink-0 text-danger-fg">*</span>}
                           </button>
                           <FieldChips k={k} hideHidden />
-                          {lockOf(k) ? <span className="w-9 shrink-0" />
-                            : <Tip text={ownHidden(k) ? 'Hidden — switch on to show it' : 'Shown — switch off to hide it'}>
-                                <span className="inline-flex shrink-0"><Toggle checked={!ownHidden(k)} onChange={(on) => setRule(k, { hidden: !on })} /></span>
-                              </Tip>}
+                          {(['console', 'grow'] as const).map((p) => {
+                            const who = p === 'grow' ? 'Grow' : 'Ops'
+                            const par = hiddenWithOn(k, p)
+                            const on = !ownHiddenOn(k, p)
+                            return lockOn(k) === 'system' || lockOn(k) === 'form'
+                              ? <span key={p} className="w-[76px] shrink-0 text-center text-[12px] text-ink-3">{who} · always</span>
+                              : <Tip key={p} text={par && on ? `Show for ${who} — on; it shows once ${fieldName(par)} does` : `Show for ${who} — ${on ? 'on' : 'off'}`}>
+                                  <span className="inline-flex w-[76px] shrink-0 items-center justify-end gap-1.5 text-[12px] text-ink-3">{who}
+                                    <Toggle checked={on} disabled={!!lockOn(k)} onChange={(v) => setShown(k, p, v)} /></span>
+                                </Tip>
+                          })}
                         </li>
                       ))}
                     </ul>
@@ -4854,7 +5377,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
     <BuilderCtx.Provider value={builder}>
     <SortCtx.Provider value={sortApi}>
     <ShowErrorsCtx.Provider value={showErrors}>
-    <div className={merchantMode && !growSetup ? 'pb-6' : 'px-6 pb-10 pt-2'}>
+    <div className={merchantMode && !setup ? 'pb-6' : 'px-6 pb-10 pt-2'}>
       {builderBar}
       {merchantMode && pr && (
         <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-info-bg px-4 py-2.5 text-[13px] text-ink">
@@ -4884,10 +5407,16 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       {/* owner, 2026-10-06: the Summary is a vertical card — beside the form while the form area is at least 1000px wide
           (container query, so a collapsed sidebar counts), else under the cards. One element, placed by the grid. */}
       <div className="@container">
-      <div className={summaryShown ? 'grid items-start gap-6 @min-[1000px]:grid-cols-[minmax(0,1fr)_300px]' : ''}>
-      <div className="grid min-w-0 gap-6">
+      <div className={summaryShown ? 'grid items-start gap-4 @min-[1000px]:grid-cols-[minmax(0,1fr)_300px]' : ''}>
+      <div className="grid min-w-0 gap-4">
         {orderedSections.filter((id) => byId[id]).map((id, n, list) => (
-          <div key={id} className="relative min-w-0">
+          <div key={id} className={`group/card relative min-w-0 ${editing && growOnlyCard(id) ? '[&>section]:opacity-60' : ''}`}>
+            {editing && !merchantMode && cardHideable(id) && (
+              <span className="absolute -top-[11px] left-5 z-20 inline-flex items-center gap-1.5 rounded-full bg-surface pl-1 pr-1">
+                <span className="text-[11px] text-ink-3">Card</span>{cardShowTools(id, SECTION_TITLES[id] ?? 'this card')}
+                {growOnlyCard(id) && <span className={`${CHIP} bg-brand-50 font-bold text-brand-600`}>Grow only</span>}
+              </span>
+            )}
             {editing && !simple && list.length > 1 && (
               <SectionMover title={SECTION_TITLES[id] ?? 'this card'} first={n === 0} last={n === list.length - 1}
                 onMove={(dir) => {
@@ -4900,16 +5429,6 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
             {byId[id]}
           </div>
         ))}
-        {/* Grow: Service Type is asked on step 2 (checkout) — previewed here, after the step-1 cards, so the field can
-            be renamed, hidden with a default service, or shown as Grid | List; it is not a movable card */}
-        {merchantMode && editing && growServiceCard && (
-          <>
-            <p className="flex items-center gap-3 text-[12px] font-bold uppercase tracking-wide text-ink-3">
-              <span className="h-px flex-1 bg-warm-200" />Next step · Service &amp; payment<span className="h-px flex-1 bg-warm-200" />
-            </p>
-            {merchantServiceSection}
-          </>
-        )}
       </div>
       {summaryShown && (
         <aside className="min-w-0 @min-[1000px]:sticky @min-[1000px]:top-4 @min-[1000px]:max-h-[calc(100vh-2rem)] @min-[1000px]:overflow-y-auto">
@@ -4922,23 +5441,34 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
       {allFieldsDialog}
 
       {/* sticky footer — the form switch (owner, 2026-09-29: where the section strip was), then Go Back + Add Order */}
-      <div data-form-footer className="sticky bottom-0 z-30 mt-6 flex items-center gap-x-4 rounded-xl border border-warm-200 bg-surface px-6 py-3 shadow-ds-1">
+      <div data-form-footer className="sticky bottom-0 z-30 mt-4 flex items-center gap-x-4 rounded-xl border border-warm-200 bg-surface px-6 py-3 shadow-ds-1">
         {merchantMode ? (
           /* Grow step 1 (owner, 2026-10-07: "remove the estimate from the bar below"): no price here — the rate is shown where the
              service is chosen, on the next step. Only what STOPS an order is said: no vehicle, or no bookable service. */
-          mode && ready && !ftlOk ? <p className="min-w-0 truncate text-[13px] text-ink-3">Add a vehicle</p>
-            : mode && ready && ftlOk && !quotes.length ? <p className="min-w-0 truncate text-[13px] text-ink-3">No service can be booked on this route — please contact support</p>
-            : null
+          /* owner, 2026-10-27 (the Grow team's form): how far the required fields are, then what STOPS the order */
+          <div className="flex min-w-0 items-center gap-3">
+            {!editing && (
+              <span className="flex shrink-0 items-center gap-2 text-[13px] text-ink-2">
+                <span className="h-1.5 w-24 overflow-hidden rounded-full bg-warm-100">
+                  <span className={`block h-full rounded-full ${canSubmit ? 'bg-success-fg' : 'bg-brand-500'}`}
+                    style={{ width: `${allReq.length ? Math.round((filledCount / allReq.length) * 100) : 100}%` }} />
+                </span>
+                <span><b className="text-ink">{filledCount}/{allReq.length}</b> required</span>
+              </span>
+            )}
+            {mode && ready && !ftlOk ? <p className="min-w-0 truncate text-[13px] text-ink-3">Add a vehicle</p>
+              : mode && ready && ftlOk && !quotes.length ? <p className="min-w-0 truncate text-[13px] text-ink-3">No service can be booked on this route — please contact support</p>
+              : null}
+          </div>
         ) : (
-          /* a view switch, not an action — quieter than Add Order */
-          <Button variant="ghost" disabled={editing} onClick={() => setTier(simple ? 'full' : 'simplified')}>
-            {simple ? 'Switch to Regular form' : 'Switch to Simplified'}
-          </Button>
+          /* the Simplified switch is gone (owner, 2026-10-27) */
+          null
         )}
         {/* the actions never wrap away from each other — the strip gives way first */}
         <div className="ml-auto flex shrink-0 items-center gap-3">
           {editing
             ? <span className="text-[13px] text-ink-2">Save or cancel the form changes first</span>
+            : building && previewing && !(showErrors && !canSubmit) ? <span className="text-[13px] text-ink-2">Preview — nothing is created</span>
             : showErrors && !canSubmit && (
               /* a way back to the gaps once the page has scrolled away from them */
               <button type="button" onClick={() => { const first = orderedSections.find((s) => !doneOf[s]); if (first) jumpTo(first) }}
@@ -4946,10 +5476,13 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
                 {missingCount} field{missingCount === 1 ? '' : 's'} to fill or fix
               </button>
             )}
-          {!editing && <Button variant="ghost" onClick={goBack}>Go Back</Button>}
+          {/* Grow (owner, 2026-10-27, the Grow team's form): Save for later · Go Back · Create Consignment */}
+          {merchantMode && <Button variant="outline" onClick={saveForLater} disabled={building}>Save for later</Button>}
+          {!building && <Button variant="ghost" onClick={goBack}>Go Back</Button>}
           {/* enabled: a click with gaps shows them (errors appear only after this attempt) */}
-          {merchantMode && <Button variant="outline" onClick={saveForLater} disabled={editing}>Save for later</Button>}
-          <Button onClick={proceed} disabled={editing}>{merchantMode ? 'Continue' : liveEdit ? 'Save changes' : 'Add Order'}</Button>
+          <Button onClick={proceed} disabled={building}>{merchantMode
+            ? (paidNowOf(pay.choice.parts) > 0 && growQuote && pay.choice.ready ? `Pay ${money(paidNowOf(pay.choice.parts), currency)} and create` : 'Create Consignment')
+            : liveEdit ? 'Save changes' : 'Add Order'}</Button>
         </div>
       </div>
 
@@ -4961,7 +5494,7 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           onAdd={(def, required, alsoOther) => {
             setDraftCustom((ds) => [...ds, def])
             if (required) setRule(def.key, { required: true })
-            if (!alsoOther) setOtherHidden((xs) => [...xs, def.key])
+            if (!alsoOther) setShown(def.key, otherPortal, false)
             setAddCard(false)
             /* the new field opens, ready to be set up — in All fields when it was added from there */
             if (allOpen) setAllKey(def.key); else pickField(def.key)
@@ -4969,16 +5502,6 @@ function AddConsignmentV2({ portal = 'console', setup = false }: {
           }} />
       )}
       </BuilderCtx.Provider>
-      <Modal open={!!switchTo} title={`Save your changes to the ${growSetup ? 'merchant' : 'operations'} form?`}
-        subtitle={`You are switching to the ${switchTo === 'grow' ? 'merchant' : 'operations'} form.`}
-        onClose={() => setSwitchTo(null)}
-        footer={<>
-          <Button variant="ghost" onClick={() => setSwitchTo(null)}>Keep editing</Button>
-          <Button variant="outline" onClick={() => { const p = switchTo; setSwitchTo(null); if (p) goPortal(p) }}>Discard changes</Button>
-          <Button onClick={() => { const p = switchTo; setSwitchTo(null); saveEditing(() => { if (p) goPortal(p) }) }}>Save and switch</Button>
-        </>}>
-        <p className="pb-4 text-[13px] text-ink-2">Changes you have not saved are lost when you switch, unless you save them first.</p>
-      </Modal>
     </div>
     </ShowErrorsCtx.Provider>
     </SortCtx.Provider>
@@ -5027,7 +5550,8 @@ const fieldEl = (k: string) => {
   const sel = `[data-field="${CSS.escape(k)}"]`
   return document.querySelector(`[data-modal-open] ${sel}`) ?? document.querySelector(sel)
 }
-const CARD_W = 380
+/* owner, 2026-10-28 ("see everything in one go without much of a scroll"): wide enough for two columns of settings */
+const CARD_W = 680
 function AnchoredCard({ anchorKey, onClose, children }: { anchorKey: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null)
   /* the field sits in a dialog (the address pop-up): the card goes above it, and the rest of that dialog is "outside" */
@@ -5048,9 +5572,11 @@ function AnchoredCard({ anchorKey, onClose, children }: { anchorKey: string; onC
       const below = vh - r.bottom - gap - 16 - foot
       const above = r.top - gap - 16
       const left = Math.min(Math.max(16, r.left - 6), vw - CARD_W - 16)
-      setPos(below >= 420 || below >= above
-        ? { top: r.bottom + gap, left, maxHeight: Math.max(240, below), modal }
-        : { bottom: vh - r.top + gap, left, maxHeight: Math.max(240, above), modal })
+      /* neither side has room for the whole card: it takes the screen's height (over the field) rather than scroll */
+      const room = 440
+      setPos(below >= room ? { top: r.bottom + gap, left, maxHeight: below, modal }
+        : above >= room ? { bottom: vh - r.top + gap, left, maxHeight: above, modal }
+        : { top: 16, left, maxHeight: vh - 32 - foot, modal })
     }
     place()
     window.addEventListener('scroll', place, true)
@@ -5180,7 +5706,7 @@ function AddFieldDialog({ card, portal, taken, onAdd, onClose }: {
   const options = [...new Set(choices.split(/[\n,]/).map((x) => x.trim()).filter(Boolean))]
   const nameErr = !label.trim() ? 'Give the field a name' : taken.includes(label.trim().toLowerCase()) ? 'A field with this name already exists' : null
   const listErr = kind === 'list' && options.length < 2 ? 'Add at least two choices' : null
-  const other = portal === 'grow' ? 'operations' : 'merchant'
+  const other = portal === 'grow' ? 'Ops' : 'Grow'
   const add = () => {
     setTried(true)
     if (nameErr || listErr) return
@@ -5229,7 +5755,7 @@ function AddFieldDialog({ card, portal, taken, onAdd, onClose }: {
         )}
         <div className="grid gap-3">
           {kind !== 'yesno' && <InlineSwitch label="Required" title="It must be filled before the consignment can be added" checked={required} onChange={setRequired} />}
-          <InlineSwitch label={`Also show it on the ${other} form`} title={`Off: only on the ${portal === 'grow' ? 'merchant' : 'operations'} form`}
+          <InlineSwitch label={`Show for ${other} too`} title={`Off: only on the ${portal === 'grow' ? 'Grow' : 'Ops'} form`}
             checked={alsoOther} onChange={setAlsoOther} />
         </div>
       </div>

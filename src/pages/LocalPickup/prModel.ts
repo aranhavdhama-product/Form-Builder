@@ -9,10 +9,11 @@
  */
 import type { GrowOrder, GrowOrdersDb, GrowPickupRequest, PickupRequestStatus, StoreLocation } from '../../growOrders/types'
 import {
-  atDate, atParts, canAddOrdersTo, canReattempt, hasDiscrepancy, isHandedOver, isInTransitToHub, isOpenPr,
+  atDate, atParts, canAddOrdersTo, canReattempt, hasDiscrepancy, isOpenPr, isRaisedOpenPr,
   isOverduePr, isPartiallyPicked, PR_STATUSES, rangesOverlap, reattemptPending, riskReasons,
 } from '../../growOrders/tabs'
 import { hubName } from '../../growOrders/hubs'
+import { CATEGORY_FLAGS, flagsOf, palletSpacesOf } from '../LocalPFP/adapter'
 import { pickupPointKey, prActionState, splitSiblings, type PrAction } from '../../growOrders/prActions'
 import { cancelReasonLabel, failureReasonLabel } from '../../growOrders/pickupReasons'
 import type { PickupModuleConfig } from '../../config/pickupModule'
@@ -118,35 +119,38 @@ export const consignmentsLabel = (p: GrowPickupRequest): string =>
 
 /* ---------------------------------------------------------------- status --- */
 
+/**
+ * The ONE colour rule for a pickup STATE (owner, 2026-10-22): blue by default, green once it is picked up, red when it
+ * failed or was cancelled — no other colour on a state pill anywhere (Pickup page, request panel, View Pickup, PFP, Grow).
+ */
+export const prStateTone = (s: PickupRequestStatus): Tone =>
+  (s === 'Pickedup' ? 'success' : s === 'Pickup Failed' || s === 'Cancelled' ? 'danger' : 'info')
 export const PR_STATUS_TONE: Record<PickupRequestStatus, Tone> = {
-  Requested: 'neutral', Planned: 'info', 'Ready For Last Mile Dispatch': 'info', Assigned: 'info',
-  'Out For Pickup': 'warning', Completed: 'success', 'Pickup Failed': 'danger', Cancelled: 'neutral',
+  Created: 'info', 'Pickup Requested': 'info', 'Driver Assigned For Pickup': 'info', 'Out For Pickup': 'info',
+  Pickedup: 'success', 'Pickup Failed': 'danger', Cancelled: 'danger',
 }
 
 export const HANDED_OVER = 'Handed Over'
 export const IN_TRANSIT_TO_HUB = 'In transit to hub'
 export const PARTIALLY_PICKED = 'Partially picked'
 
-/** Every label the Status filter offers: the eight states + the three outcome readings. */
-export const STATUS_FILTER_OPTIONS: string[] = [...PR_STATUSES, PARTIALLY_PICKED, IN_TRANSIT_TO_HUB, HANDED_OVER]
+/** Every label the Status filter offers: the nine states + the three outcome readings. */
+/** The State filter: the seven states only (owner, 2026-10-23 — Handed Over / In transit / Partially picked are not states). */
+export const STATUS_FILTER_OPTIONS: string[] = [...PR_STATUSES]
 
-/** The outcome-aware label the Status pill shows. */
+/** The state pill: the request's STATE, one of the seven — never an outcome reading (owner, 2026-10-23: "handed over is
+ *  coming as state, we have not kept it"). Partially picked is a flag in the Exception column. */
 export function statusLabel(p: GrowPickupRequest): { label: string; tone: Tone } {
-  if (p.status === 'Completed') {
-    if (isHandedOver(p)) return { label: HANDED_OVER, tone: 'success' }
-    if (isInTransitToHub(p)) return { label: IN_TRANSIT_TO_HUB, tone: 'info' }
-    if (isPartiallyPicked(p)) return { label: PARTIALLY_PICKED, tone: 'warning' }
-  }
-  return { label: p.status, tone: PR_STATUS_TONE[p.status] }
+  return { label: p.status, tone: prStateTone(p.status) }
 }
 
 /** Does this request answer to a Status-filter label? */
 export const matchesStatus = (p: GrowPickupRequest, want: string): boolean =>
-  p.status === want || statusLabel(p).label === want || (want === PARTIALLY_PICKED && isPartiallyPicked(p))
+  p.status === want
 
-/** Ids of OPEN requests whose window overlaps another open one at the same point. */
+/** Ids of OPEN, RAISED requests whose window overlaps another at the same point (a draft is not a booking yet). */
 export function duplicateIds(prs: GrowPickupRequest[]): Set<string> {
-  const open = prs.filter((p) => isOpenPr(p.status))
+  const open = prs.filter((p) => isRaisedOpenPr(p.status))
   const dup = new Set<string>()
   open.forEach((a, i) => open.slice(i + 1).forEach((b) => {
     if (pointKey(a) === pointKey(b) && !splitSiblings(a, b) && rangesOverlap(a.startAt, a.endAt, b.startAt, b.endAt)) { dup.add(a.id); dup.add(b.id) }
@@ -163,7 +167,7 @@ export function statusTags(p: GrowPickupRequest, dup: Set<string>, now = new Dat
   if (isOverduePr(p, now)) out.push({ label: 'Overdue', tone: 'danger' })
   if (hasDiscrepancy(p)) out.push({ label: 'Discrepancy', tone: 'danger' })
   if (dup.has(p.id)) out.push({ label: 'Duplicate', tone: 'warning' })
-  if (isPartiallyPicked(p) && statusLabel(p).label !== PARTIALLY_PICKED) out.push({ label: PARTIALLY_PICKED, tone: 'warning' })
+  if (isPartiallyPicked(p)) out.push({ label: PARTIALLY_PICKED, tone: 'warning' })
   if (canReattempt(p)) out.push({ label: 'Re-attempt available', tone: 'info' })
   /* the automatic (or ops-raised) retry is still open — why this failure sits in Exception */
   if (byId && reattemptPending(p, byId)) out.push({ label: `Re-attempt scheduled · ${byId(p.reattemptPrId!)?.number ?? ''}`.trim(), tone: 'info' })
@@ -187,11 +191,13 @@ export const beforeDispatch = (p: GrowPickupRequest): boolean => isOpenPr(p.stat
 
 /* Every gate is the matrix in growOrders/prActions.ts (owner, 2026-09-25) — these
    booleans stay for the callers that only need yes / no; use prActionState for the reason. */
-const OPS_CFG = { allowAddToExistingUntil: 'Planned', merchantCancelUntil: 'Planned' } as const
+const OPS_CFG = { allowAddToExistingUntil: 'On a route', merchantCancelUntil: 'On a route' } as const
 const allowed = (a: PrAction, p: GrowPickupRequest, cfg?: PickupModuleConfig) =>
   prActionState(a, p, { cfg: cfg ?? OPS_CFG }).enabled
 
 export const can = {
+  /** a draft (Created) → Pickup Requested */
+  raise: (p: GrowPickupRequest) => allowed('raise', p),
   /** unplanned fleet → a route; a routed one before dispatch → move it */
   addToRoute: (p: GrowPickupRequest) => allowed(p.tripId ? 'moveRoute' : 'addToRoute', p) && p.carrierMode !== 'CARRIER',
   assignCarrier: (p: GrowPickupRequest) => allowed('assignCarrier', p),
@@ -396,28 +402,54 @@ export function exceptionOf(p: GrowPickupRequest, c: Pick<PrColumnCtx, 'flagsOf'
   return { text: [reasonText(p), ...flags.map((f) => f.label)].filter(Boolean).join(' · '), danger: flags.some((f) => f.tone === 'danger') || p.status === 'Pickup Failed' }
 }
 
+/* ------------------------------------------------ per-request shipment facts --- */
+
+const piecesOf = (o: GrowOrder): number => Math.max(1, o.pkg?.count ?? 1)
+/** packages booked — a reserved request with nothing attached yet counts what was expected */
+export const plannedQty = (p: GrowPickupRequest, byId: Map<string, GrowOrder>): number =>
+  (p.blind && !p.orderIds.length ? p.expectedPieces ?? 0 : ordersOf(p, byId).reduce((n, o) => n + piecesOf(o), 0))
+/** packages collected (booked + one per overage scan); null until the driver has picked anything */
+export const actualQty = (p: GrowPickupRequest, byId: Map<string, GrowOrder>): number | null => {
+  if (p.status !== 'Pickedup' && !p.pickedOrderIds.length && !p.overages.length) return null
+  return p.pickedOrderIds.map((id) => byId.get(id)).filter((o): o is GrowOrder => !!o).reduce((n, o) => n + piecesOf(o), 0) + p.overages.length
+}
+/** the category flags of the shipments on it (VIP · Stackable · Hazmat · Fragile · Heavy Weight) */
+export const categoriesOfPr = (p: GrowPickupRequest, byId: Map<string, GrowOrder>): string[] => {
+  const on = new Set(ordersOf(p, byId).flatMap((o) => flagsOf(o)))
+  return CATEGORY_FLAGS.filter((f) => on.has(f))
+}
+
 export const PR_COLUMN_DEFS: PrColumnDef[] = [
+  /* owner, 2026-10-22 (the column sheet), in reading order: what it is · when and where · who collects · how much · what kind.
+     Names follow Consignment Order / PFP: Pallet Spaces, Assigned To Driver (CO's driver column); Shipment Count is the sheet's.
+     Filter / Search per column live on the Pickup page's filter line (no grid header filters — CO and PFP have none). */
   { key: 'reference', label: 'Reference', width: 110, defaultOn: true, value: (p) => p.number, title: (p) => `${p.number} · request id ${p.id}` },
-  { key: 'status', label: 'State', width: 150, defaultOn: true, value: (p) => statusLabel(p).label },
-  /* owner, 2026-10-07: beside the state — why it needs a hand (the reason and every flag), empty when nothing is wrong */
+  { key: 'status', label: 'State', width: 200, defaultOn: true, value: (p) => statusLabel(p).label },
   { key: 'exception', label: 'Exception', width: 200, defaultOn: true, value: (p, c) => exceptionOf(p, c).text },
   { key: 'type', label: 'Type', width: 110, defaultOn: true, value: prTypeLabel },
-  { key: 'attempt', label: 'Attempt', width: 76, align: 'right', defaultOn: true, value: prAttemptLabel },
-  /* owner, 2026-09-25: start and end are ONE value — the window — not two columns */
   { key: 'window', label: 'Pickup Window', width: 200, defaultOn: true, value: (p) => fmtWindow(p),
     title: (p) => { const t = windowTag(p); return `${fmtWindow(p)}${t ? ` · ${t}` : ''}` } },
+  { key: 'merchant', label: 'Merchant', width: 150, defaultOn: true, value: (p, c) => merchantOfPr(p, c.stores) },
   { key: 'address', label: 'Pickup Address', width: 170, defaultOn: true, value: (p, c) => pickupPointName(p, c.stores),
     title: (p, c) => `${pickupPointName(p, c.stores)} — ${pickupPointAddress(p, c.stores)}` },
   { key: 'hub', label: 'Destination Hub', width: 160, defaultOn: true, value: (p, c) => dropLabel(p, c.stores) },
-  { key: 'merchant', label: 'Merchant', width: 150, defaultOn: true, value: (p, c) => merchantOfPr(p, c.stores) },
-  { key: 'shipments', label: 'Shipments', width: 90, align: 'right', defaultOn: true, value: (p) => consignmentsLabel(p) },
+  { key: 'carrier', label: 'Carrier', width: 150, defaultOn: true,
+    value: (p) => (p.carrierName ? `${p.carrierName}${p.carrierMode === 'CARRIER' ? ' · 3PL' : ''}` : '') },
+  { key: 'rider', label: 'Assigned To Driver', width: 160, defaultOn: true, value: (p) => p.driverName ?? '' },
+  { key: 'shipments', label: 'Shipment Count', width: 116, align: 'right', defaultOn: true, value: (p) => consignmentsLabel(p) },
+  { key: 'plannedQty', label: 'Planned Quantity', width: 120, align: 'right', defaultOn: true, value: (p, c) => String(plannedQty(p, c.byId)),
+    title: () => 'Packages booked on the request' },
+  { key: 'actualQty', label: 'Actual Quantity', width: 116, align: 'right', defaultOn: true,
+    value: (p, c) => { const a = actualQty(p, c.byId); return a == null ? '' : String(a) },
+    title: () => 'Packages collected (booked + overage scans) — known once the driver has picked' },
+  { key: 'overage', label: 'Shipment Overage', width: 130, align: 'right', defaultOn: true, value: (p) => (p.overages.length ? String(p.overages.length) : '') },
   { key: 'weight', label: 'Weight', width: 90, align: 'right', defaultOn: true,
     value: (p, c) => { const w = weightLabel(p, c.byId); return w === '—' ? '' : w } },
-  { key: 'collector', label: 'Driver / Carrier', width: 160, defaultOn: true,
-    value: (p) => p.driverName || (p.carrierName ? `${p.carrierName}${p.carrierMode === 'CARRIER' ? ' · 3PL' : ''}` : ''),
-    title: (p) => [p.driverName, p.carrierName && `${p.carrierName}${p.carrierMode === 'CARRIER' ? ' · 3PL' : ''}`].filter(Boolean).join(' · ') },
-  { key: 'trip', label: 'Trip', width: 110, defaultOn: true, value: (p) => p.tripId ?? '' },
-  { key: 'source', label: 'Source', width: 100, defaultOn: true, value: (p) => p.source },
+  { key: 'pallets', label: 'Pallet Spaces', width: 110, align: 'right', defaultOn: true,
+    value: (p, c) => { const n = ordersOf(p, c.byId).reduce((s, o) => s + palletSpacesOf(o), 0); return n ? String(n) : '' } },
+  { key: 'category', label: 'Shipment Category', width: 170, defaultOn: true, value: (p, c) => categoriesOfPr(p, c.byId).join(', ') },
+  { key: 'service', label: 'Service Type', width: 130, defaultOn: true,
+    value: (p, c) => [...new Set(ordersOf(p, c.byId).map((o) => o.serviceType).filter(Boolean))].join(', ') },
   /* ---- optional (⚙) ---- */
   { key: 'tags', label: 'Tags', width: 180, value: (p, c) => c.tagsOf?.(p).join(', ') ?? '' },
   { key: 'vehicle', label: 'Vehicle Type', width: 130, value: (p) => p.vehicleType ?? '' },

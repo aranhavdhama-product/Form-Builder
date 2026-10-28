@@ -587,8 +587,8 @@ export const planningActions = {
         notPickedReasons: extra.notPickedReasons, pod: extra.pod, overages: extra.overages,
       })
     }
-    if (scanned.length && pickupRequestById(prId)?.status === 'Completed') growOrderActions.driverScan(prId, scanned)
-    const ok = pickupRequestById(prId)?.status === 'Completed'
+    if (scanned.length && pickupRequestById(prId)?.status === 'Pickedup') growOrderActions.driverScan(prId, scanned)
+    const ok = pickupRequestById(prId)?.status === 'Pickedup'
     mapTrip(tripId, (t) => ({ ...t, stops: t.stops.map((x) => (x.prId === prId ? { ...x, status: ok ? 'Done' : 'Failed' } : x)) }))
     commit()
   },

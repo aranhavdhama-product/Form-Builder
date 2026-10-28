@@ -20,6 +20,7 @@ import { readRoutingPlans, useRoutingPlans } from '../pages/LocalRouting/routing
    which is what puts Pending For Planning's filter row at the measured y=81. */
 const TITLES: [string, string][] = [
   ['/local/consignments', 'Consignment Order'],
+  ['/local/pending-for-planning-scan', 'Pending For Planning · Scan'],
   ['/local/pending-for-planning-replica', 'Pending For Planning'],
   ['/local/pending-for-planning', 'Pending For Planning'],
   ['/local/pickup', 'Pickup'],
@@ -34,6 +35,7 @@ const TITLES: [string, string][] = [
   ['/local/settings/general', 'General Settings'],
   ['/local/settings/consignment-order', 'Consignment Order'],
   ['/local/settings', 'Settings'],
+  ['/local/columns/pickup', 'Column Configuration'],
   ['/local/columns', 'Column Configuration'],
 ]
 

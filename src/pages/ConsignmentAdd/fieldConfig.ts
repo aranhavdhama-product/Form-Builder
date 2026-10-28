@@ -80,6 +80,11 @@ export const CONSIGNMENT_FIELDS: FieldDef[] = [
     apiPath: 'consignmentDetails.schedulingConfirmationRequired (v3)' },
   { key: 'dedicateTruck', defaultLabel: 'Dedicate Truck', section: 'Handling & scheduling', form: 'full',
     apiPath: 'consignmentDetails.dedicatedTruck (v3)' },
+  /* owner, 2026-10-27: the Shipment legs pills became ONE switch, worded like Load type — Delivery type: Direct Delivery.
+     Off (default) = through a hub, the legs follow Ship From and Ship To; on = Pick & Del, one trip, no hub. (key kept) */
+  { key: 'hubProcessing', defaultLabel: 'Task type', section: 'Handling & scheduling', form: 'full',
+    apiPath: 'consignmentDetails.movementType (on = PICK_AND_DEL; off = the legs the two addresses give)',
+    note: 'Direct Delivery on: one trip, no hub — the same rider picks up and delivers. Off: through a hub.' },
   { key: 'totalLoadingTime', defaultLabel: 'Total Loading Time (minutes)', section: 'Handling & scheduling', dependsOn: 'dedicateTruck', form: 'full',
     apiPath: 'consignmentDetails.totalLoadingTime (v3)',
     note: 'Dependency: loading time only applies when a dedicated truck is requested.' },

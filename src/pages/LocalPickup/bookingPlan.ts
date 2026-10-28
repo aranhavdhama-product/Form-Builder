@@ -7,7 +7,7 @@
  * lives in `bookingCards.tsx`.
  */
 import { growOrderActions, pickupRequestById } from '../../growOrders/store'
-import { canAddOrdersTo, isOverduePr } from '../../growOrders/tabs'
+import { canAddOrdersTo, isDraftPr, isOverduePr } from '../../growOrders/tabs'
 import { pickupPointKey } from '../../growOrders/prActions'
 import type { GrowPickupRequest, Party, PickupSource } from '../../growOrders/types'
 
@@ -31,7 +31,7 @@ export function joinCandidates(g: Pick<BookingGroup, 'storeCode' | 'destinationC
   if (g.vehicle) return []
   const key = pickupPointKey({ storeCode: g.storeCode, shipFrom: null })
   return prs
-    .filter((p) => pickupPointKey(p) === key && p.shipmentType !== 'FTL'
+    .filter((p) => pickupPointKey(p) === key && p.shipmentType !== 'FTL' && !isDraftPr(p.status)
       && canAddOrdersTo(p, until) && !isOverduePr(p, now)
       && (p.destinationCode == null || p.destinationCode === g.destinationCode))
     .sort((a, b) => a.startAt.localeCompare(b.startAt))
@@ -40,6 +40,8 @@ export function joinCandidates(g: Pick<BookingGroup, 'storeCode' | 'destinationC
 /** Run one group's choice. `failed` collects what refused. */
 export function bookGroup(g: BookingGroup, choice: BookingChoice, common: {
   startAt: string; endAt: string; instructions?: string; source?: PickupSource; merchantCode?: string | null
+  /** "Save as draft" — the new request is Created, not raised (owner, 2026-10-22) */
+  draft?: boolean
 }, failed: string[]): BookingOutcome[] {
   if (choice.mode === 'existing') {
     const { added } = growOrderActions.addOrdersToPickup(choice.prId, g.orderIds)

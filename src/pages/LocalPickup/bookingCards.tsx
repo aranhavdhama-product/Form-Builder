@@ -122,7 +122,7 @@ export function SplitPickupDialog({ pr, merchantCode, onClose, onDone }: {
           {all ? 'At least one consignment must stay on the original request.'
             : sel.size ? `${plural(sel.size, 'consignment')} move to a new request; ${plural(pr.orderIds.length - sel.size, 'consignment')} stay on ${pr.number}.`
               : 'Tick the consignments to move onto the new request.'}
-          {pr.tripId ? ' The new request is not on a trip — it goes back to planning as Requested.' : ''}
+          {pr.tripId ? ' The new request is not on a trip — it goes back to planning as Pickup Requested.' : ''}
         </p>
         <label className="inline-flex items-center gap-2 text-[13px] text-ink">
           <Toggle checked={otherWindow} onChange={setOtherWindow} /> Different date / slot for the new request

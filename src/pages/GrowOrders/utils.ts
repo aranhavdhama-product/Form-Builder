@@ -243,7 +243,7 @@ export const windowEnd = (p: { endAt: string }): Date => atDate(p.endAt)
  * forgotten.
  */
 export const prOverdue = (p: GrowPickupRequest, now = Date.now()) =>
-  p.status === 'Requested' && windowEnd(p).getTime() < now
+  p.status === 'Pickup Requested' && windowEnd(p).getTime() < now
 
 /** Has the collection window opened? Drives the "nothing attached yet" warning. */
 export const prWindowStarted = (p: { startAt: string }, now = Date.now()) => atDate(p.startAt).getTime() <= now
@@ -321,7 +321,7 @@ export const PARTIALLY_PICKED = 'Partially picked'
 export const PR_FILTER_STATUSES = [...PR_STATUSES, PARTIALLY_PICKED] as const
 
 export function prOutcomeLabel(p: GrowPickupRequest): string {
-  if (p.status !== 'Completed') return p.status
+  if (p.status !== 'Pickedup') return p.status
   const s = pickupSummary(p)
   return s.booked - s.picked > 0 ? PARTIALLY_PICKED : 'Completed'
 }
@@ -345,7 +345,7 @@ export const prExtraOrders = (p: GrowPickupRequest, orders: GrowOrder[]) =>
   orders.filter((o) => o.pickedInRequestId === p.id && !p.orderIds.includes(o.id))
 
 /** Reconciliation only exists once the handover has been attempted. */
-export const prReconciled = (p: GrowPickupRequest) => p.status === 'Completed' || p.status === 'Pickup Failed'
+export const prReconciled = (p: GrowPickupRequest) => p.status === 'Pickedup' || p.status === 'Pickup Failed'
 
 /** The key two requests must share to be the same van turning up twice: the
  *  pickup POINT, which is the typed-in collection address when there is one. */

@@ -170,10 +170,12 @@ function CalendarPop({ value, pos, popRef, onPick }: {
  * picker and speaks ISO `YYYY-MM-DD`, like the Nueva DateInput it replaces;
  * `text` keeps Pending For Planning's two free-text fields.
  */
-export function DateRange({ start, end, onStart, onEnd, mode = 'calendar' }: {
+export function DateRange({ start, end, onStart, onEnd, mode = 'calendar', placeholders = ['Start Date', 'End Date'] }: {
   start: string; end: string
   onStart: (v: string) => void; onEnd: (v: string) => void
   mode?: 'calendar' | 'text'
+  /** what the empty halves say — e.g. the Pickup page's "Pickup Planning date" */
+  placeholders?: [string, string]
 }) {
   const [open, setOpen] = useState<'start' | 'end' | null>(null)
   const [pos, setPos] = useState<PopPos | null>(null)
@@ -183,10 +185,10 @@ export function DateRange({ start, end, onStart, onEnd, mode = 'calendar' }: {
 
   if (mode === 'text') {
     return (
-      <div className="pfp-daterange">
-        <input value={start} placeholder="Start Date" onChange={(e) => onStart(e.target.value)} />
+      <div className="pfp-daterange" data-wide={placeholders[0].length > 12 || undefined}>
+        <input value={start} placeholder={placeholders[0]} aria-label={placeholders[0]} onChange={(e) => onStart(e.target.value)} />
         <span className="pfp-daterange-sep"><SwapRight size={16} /></span>
-        <input value={end} placeholder="End Date" onChange={(e) => onEnd(e.target.value)} />
+        <input value={end} placeholder={placeholders[1]} aria-label={placeholders[1]} onChange={(e) => onEnd(e.target.value)} />
         <span className="pfp-daterange-icon"><Calendar size={14} /></span>
       </div>
     )
@@ -204,10 +206,10 @@ export function DateRange({ start, end, onStart, onEnd, mode = 'calendar' }: {
     </button>
   )
   return (
-    <div className="pfp-daterange" ref={ref}>
-      {half('start', start, 'Start Date')}
+    <div className="pfp-daterange" ref={ref} data-wide={placeholders[0].length > 12 || undefined}>
+      {half('start', start, placeholders[0])}
       <span className="pfp-daterange-sep"><SwapRight size={16} /></span>
-      {half('end', end, 'End Date')}
+      {half('end', end, placeholders[1])}
       <button type="button" className="pfp-daterange-icon" aria-label="Open calendar"
         onClick={() => toggle(start ? 'end' : 'start')}><Calendar size={14} /></button>
       {open && pos && (

@@ -13,7 +13,7 @@ import { blankParty, CURRENCY, seed, STORES } from './seed'
 import { DEFAULT_INBOUND_HUB, inboundHubFor } from './hubs'
 import {
   atDate, atParts, canAddOrdersTo, canReattempt, handoverReconciled, isOpenPr, localIso, nextPrStatus,
-  PICKUP_SLOTS, PR_ENTRY_STATUS, PR_STATUSES, prHasNothingToCollect, rangesOverlap, slotFrom, SPLITTABLE_PR_STATUSES, tabOf, windowFromSlot,
+  PICKUP_SLOTS, PR_DRAFT_STATUS, PR_ENTRY_STATUS, PR_STATUSES, isDraftPr, prHasNothingToCollect, rangesOverlap, slotFrom, SPLITTABLE_PR_STATUSES, tabOf, windowFromSlot,
 } from './tabs'
 import { blankHandover, PR_DEFAULTS, SIZE_CLASSES } from './types'
 import { cancelReasonLabel, failureReasonLabel, NO_ORDERS_REASON } from './pickupReasons'
@@ -48,7 +48,10 @@ import { hasActiveSchedule, pickRunPr, staleScheduleRequests } from './scheduleM
    PRs 138/139, PR-000129's auto re-attempt PR-000140, PR-000104 back to
    Requested) + `carrierPickupRef`; bumped TOGETHER with planningStore's v4. */
 /* v17: `readyToShip` — paid consignments read Created until marked ready (seed: half each). */
-const KEY = 'fareye-grow-orders-v17'
+/* v18: pickup states (owner, 2026-10-22) — `Requested` → `Pickup Requested`, `Created` = a draft request; the seed gains drafts. */
+/* v19: official pickup names — Planned / Ready For LMD dropped, Driver Assigned For Pickup, Pickedup (owner, 2026-10-22). */
+/* v20: seeded histories start at Pickup Requested — a Created step only on a real draft. */
+const KEY = 'fareye-grow-orders-v20'
 
 /** Explicit field defaults — deliberately NOT derived from a seed row, so what a
  *  persisted blob inherits can never drift with the seed data. */
@@ -111,12 +114,17 @@ function normalize(o: Partial<GrowOrder>): GrowOrder {
 /**
  * Older blobs must still load cleanly:
  *  - pre-v9 `'Created'` — the state merged into `Requested`.
- *  - pre-v4 `'Driver Assigned'` — renamed to `Assigned`.
+ *  - pre-v4 `'Driver Assigned'` — renamed to `Assigned`, now `Driver Assigned For Pickup`.
+ *  - pre-v19 names (Requested, Planned, Ready For Last Mile Dispatch, Assigned, Completed) — see toPrStatus.
  * Anything unrecognised falls back to the entry state rather than crashing a page.
  */
 function toPrStatus(s: unknown): PickupRequestStatus {
-  if (s === 'Driver Assigned') return 'Assigned'
-  if (s === 'Created') return PR_ENTRY_STATUS
+  /* 2026-10-22, FarEye's official names: Planned / Ready For Last Mile Dispatch are dropped (a trip is a tag on
+     Pickup Requested), Assigned → Driver Assigned For Pickup, Completed → Pickedup; `Created` is a draft again
+     (the v18 reseed retired its old meaning) */
+  if (s === 'Requested' || s === 'Planned' || s === 'Ready For Last Mile Dispatch') return PR_ENTRY_STATUS
+  if (s === 'Assigned' || s === 'Driver Assigned') return 'Driver Assigned For Pickup'
+  if (s === 'Completed') return 'Pickedup'
   return (PR_STATUSES as readonly string[]).includes(s as string) ? (s as PickupRequestStatus) : PR_ENTRY_STATUS
 }
 
@@ -157,7 +165,7 @@ function normalizePr(p: Partial<GrowPickupRequest>): GrowPickupRequest {
     createdAt,
     instructions: p.instructions,
     statusHistory: Array.isArray(p.statusHistory) && p.statusHistory.length
-      ? p.statusHistory
+      ? p.statusHistory.map((e) => ({ ...e, status: toPrStatus(e.status) }))
       : [{ status, at: createdAt }],
     /* a pre-v5 blob is an ordinary order-backed request by construction */
     blind: p.blind === true,
@@ -355,7 +363,7 @@ function stamp(p: GrowPickupRequest, status: PickupRequestStatus, note?: string)
   const moved = { ...p, status, statusHistory: [...p.statusHistory, { status, at, note }] }
   /* "Pickup manifest required" OFF (Settings → Pickup module): a completed pickup has no manifest to reconcile —
      its handover closes with it (the driver's word is the record) */
-  if (status === 'Completed' && !readPickupModuleConfig().manifestRequired && !p.handover.closedAt) {
+  if (status === 'Pickedup' && !readPickupModuleConfig().manifestRequired && !p.handover.closedAt) {
     return { ...moved, handover: { ...p.handover, closedAt: at, arrivedAtHubAt: p.handover.arrivedAtHubAt ?? at },
       statusHistory: [...moved.statusHistory, { status, at, note: 'Closed — no pickup manifest required' }] }
   }
@@ -394,7 +402,7 @@ function closeNow(id: string, note: string) {
  *  the trip debrief (spec H1); a hub scan always stamps the arrival itself. */
 function closeIfReconciled(id: string) {
   const p = db.pickupRequests.find((x) => x.id === id)
-  if (p && p.status === 'Completed' && !p.handover.closedAt && p.handover.arrivedAtHubAt && handoverReconciled(p)) {
+  if (p && p.status === 'Pickedup' && !p.handover.closedAt && p.handover.arrivedAtHubAt && handoverReconciled(p)) {
     closeNow(id, `Handover reconciled — ${plural(p.pickedOrderIds.length, 'consignment')}`)
   }
 }
@@ -477,7 +485,7 @@ export const growOrderActions = {
         const next = noted({ ...p, orderIds: p.orderIds.filter((i) => i !== id) },
           `Order ${before?.orderNumber ?? id} cancelled — removed`)
         emptied = !next.blind && next.orderIds.length === 0 && next.overages.length === 0
-          && (next.status === 'Requested' || next.status === 'Planned')
+          && next.status === 'Pickup Requested'
         return emptied
           ? { ...stamp(next, 'Pickup Failed', 'No orders left'), failureReason: NO_ORDERS_REASON, tripId: null, driverName: null }
           : next
@@ -583,8 +591,10 @@ export const growOrderActions = {
    * a selection spanning several (pickup location → destination) pairs — or
    * carrying a dedicated vehicle — is several calls, one per group.
    */
-  createPickupRequest({ storeCode, destinationCode = null, orderIds, instructions, vehicle, source = 'Merchant', merchantCode, split = false, ...win }: {
+  createPickupRequest({ storeCode, destinationCode = null, orderIds, instructions, vehicle, source = 'Merchant', merchantCode, split = false, draft = false, ...win }: {
     storeCode: string; destinationCode?: string | null; orderIds: string[]; instructions?: string
+    /** "Save as draft" (owner, 2026-10-22): the request is `Created`, not raised — it never joins another request. */
+    draft?: boolean
     /** "Split into separate requests" (owner, 2026-09-25): the user asked for its own request — never merged. */
     split?: boolean
     /** Who raised it — the merchant portal by default; the console passes 'Console'. */
@@ -608,11 +618,11 @@ export const growOrderActions = {
        the same destination hub — a request drops at ONE hub. A vehicle booking
        is always its own request. `merged: true` tells the caller which happened. */
     const policy = pickupPolicy(merchantCode).multiPrPolicy
-    if (!vehicle && !split && policy !== 'UNLIMITED') {
+    if (!vehicle && !split && !draft && policy !== 'UNLIMITED') {
       const key = pointKey({ storeCode, shipFrom: null })
       const until = pickupPolicy(merchantCode).allowAddToExistingUntil
       const target = db.pickupRequests
-        .filter((p) => pointKey(p) === key && p.shipmentType !== 'FTL' && canAddOrdersTo(p, until)
+        .filter((p) => pointKey(p) === key && p.shipmentType !== 'FTL' && !isDraftPr(p.status) && canAddOrdersTo(p, until)
           && (p.destinationCode ?? null) === destinationCode
           && (policy === 'ONE_OPEN_PER_LOCATION' || rangesOverlap(startAt, endAt, p.startAt, p.endAt)))
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0]
@@ -629,10 +639,10 @@ export const growOrderActions = {
     }
     const pr: GrowPickupRequest = {
       id: newPrId(), number: nextPrNumber(), storeCode, destinationCode, startAt, endAt, date, slot,
-      orderIds: [...orderIds], status: PR_ENTRY_STATUS, createdAt, instructions,
-      statusHistory: [{ status: PR_ENTRY_STATUS, at: createdAt, note: vehicle
+      orderIds: [...orderIds], status: draft ? PR_DRAFT_STATUS : PR_ENTRY_STATUS, createdAt, instructions,
+      statusHistory: [{ status: draft ? PR_DRAFT_STATUS : PR_ENTRY_STATUS, at: createdAt, note: (draft ? 'Saved as draft — ' : '') + (vehicle
         ? `Vehicle booked — ${vehicle.vehicleUnit} × ${vehicle.vehicleType}`
-        : `${orderIds.length} order${orderIds.length === 1 ? '' : 's'} booked` }],
+        : `${orderIds.length} order${orderIds.length === 1 ? '' : 's'} booked`) }],
       ...NOT_BLIND,
       ...freshExecution(source, merchantCode),
       ...(vehicle ? {
@@ -650,6 +660,15 @@ export const growOrderActions = {
       : o))
     commit()
     return { ...pr, merged: false, skipped }
+  },
+
+  /** Raise a draft (owner, 2026-10-22): `Created` → `Pickup Requested`. Its consignments read Pickup Requested from now on. */
+  raisePickupRequest(id: string): boolean {
+    const cur = db.pickupRequests.find((p) => p.id === id)
+    if (!cur || !isDraftPr(cur.status)) return false
+    mapPr(id, (p) => stamp(p, PR_ENTRY_STATUS, 'Pickup request raised'))
+    commit()
+    return true
   },
 
   /**
@@ -865,7 +884,7 @@ export const growOrderActions = {
     if (!cur || !next) return null
     /* a pickup with nothing to hand over cannot COMPLETE — the driver arrived to
        an empty dock, which is a failed pickup */
-    if (next === 'Completed' && prHasNothingToCollect(cur)) {
+    if (next === 'Pickedup' && prHasNothingToCollect(cur)) {
       growOrderActions.failPickupRequest(id, EMPTY_PICKUP_NOTE, NO_ORDERS_REASON)
       return 'Pickup Failed'
     }
@@ -874,11 +893,11 @@ export const growOrderActions = {
       const moved = stamp(p, next)
       /* a simulated completion means "the driver collected everything that was
          booked" — without this the reconciliation line would read `4 booked · 0 picked` */
-      return next === 'Completed' && moved.pickedOrderIds.length === 0
+      return next === 'Pickedup' && moved.pickedOrderIds.length === 0
         ? { ...moved, pickedOrderIds: [...moved.orderIds] }
         : moved
     })
-    if (next === 'Completed') {
+    if (next === 'Pickedup') {
       const s = new Set(cur.orderIds)
       db.orders = db.orders.map((o) => (s.has(o.id) && o.pickupRequestId === id ? { ...o, status: 'Picked Up' } : o))
     }
@@ -899,8 +918,8 @@ export const growOrderActions = {
       const moved = { ...p, startAt, endAt, date, slot }
       if (!p.tripId) return noted(moved, note)
       const off = { ...moved, tripId: null, driverName: null }
-      return p.status === 'Planned' || p.status === 'Ready For Last Mile Dispatch' || p.status === 'Assigned'
-        ? stamp(off, 'Requested', `${note} — removed from trip ${p.tripId}`)
+      return p.status === 'Driver Assigned For Pickup'
+        ? stamp(off, 'Pickup Requested', `${note} — removed from trip ${p.tripId}`)
         : noted(off, `${note} — removed from trip ${p.tripId}`)
     })
     db.orders = db.orders.map((o) => (o.pickupRequestId === id ? { ...o, pickupDate: date } : o))
@@ -1008,7 +1027,7 @@ export const growOrderActions = {
     const picked = [...new Set([...(x.pickedOrderIds ?? []).filter((i) => booked.has(i)), ...extra])]
     const scans = scansIn
     db.pickupRequests = db.pickupRequests.map((p) => (p.id === id
-      ? { ...stamp(p, 'Completed', byCount
+      ? { ...stamp(p, 'Pickedup', byCount
         ? `${picked.length} of ${cur.orderIds.length} counted — the hub scan confirms`
         : `${picked.length} of ${cur.orderIds.length} collected${scans.length ? ` · ${scans.length} overage scan${scans.length === 1 ? '' : 's'}` : ''}`),
         pickedOrderIds: picked, overages: [...p.overages, ...scans],
@@ -1038,7 +1057,7 @@ export const growOrderActions = {
     db.pickupRequests = db.pickupRequests.map((p) => {
       if (p.id !== prId) return p
       const next = { ...p, overages: p.overages.map((v) => (v.id === overageId ? { ...v, orderId } : v)) }
-      if (!scanned || p.status !== 'Completed' || p.pickedOrderIds.includes(orderId)) return next
+      if (!scanned || p.status !== 'Pickedup' || p.pickedOrderIds.includes(orderId)) return next
       return { ...next, pickedOrderIds: [...p.pickedOrderIds, orderId],
         handover: p.handover.mode === 'hub' ? p.handover
           : { ...p.handover, driverScanned: [...new Set([...p.handover.driverScanned, orderId])] } }
@@ -1080,25 +1099,25 @@ export const growOrderActions = {
       if (tripId && p.tripId === tripId) {
         if (p.driverName === driverName) return p
         const moved = { ...p, driverName }
-        return driverName && (p.status === 'Planned' || p.status === 'Ready For Last Mile Dispatch')
-          ? stamp(moved, 'Assigned', `Driver ${driverName} assigned on ${tripId}`)
+        return driverName && p.status === 'Pickup Requested'
+          ? stamp(moved, 'Driver Assigned For Pickup', `Driver ${driverName} assigned on ${tripId}`)
           : noted(moved, driverName ? `Driver changed to ${driverName}` : 'Driver unassigned')
       }
       if (tripId) {
         let next: GrowPickupRequest = { ...p, tripId, driverName }
-        if (next.status === 'Requested') next = stamp(next, 'Planned', `Added to trip ${tripId}`)
-        else next = noted(next, `Added to trip ${tripId}`)
-        if (driverName && (next.status === 'Planned' || next.status === 'Ready For Last Mile Dispatch')) {
-          next = stamp(next, 'Assigned', `Driver ${driverName} assigned on ${tripId}`)
+        /* 2026-10-22: no Planned state — being on a route is the trip tag; the status stays Pickup Requested */
+        next = noted(next, `Added to trip ${tripId}`)
+        if (driverName && next.status === 'Pickup Requested') {
+          next = stamp(next, 'Driver Assigned For Pickup', `Driver ${driverName} assigned on ${tripId}`)
         }
         return next
       }
       const next: GrowPickupRequest = { ...p, tripId: null, driverName: null }
       const note = p.tripId ? `Removed from trip ${p.tripId}` : 'Removed from trip'
       /* only a 3PL keeps its state off a trip — an "Own fleet" allocation carries a carrier
-         code too, and must not stay Planned / Assigned with no trip */
-      return p.carrierMode !== 'CARRIER' && (p.status === 'Planned' || p.status === 'Ready For Last Mile Dispatch' || p.status === 'Assigned')
-        ? stamp(next, 'Requested', note)
+         code too, and must not stay Driver Assigned For Pickup with no trip */
+      return p.carrierMode !== 'CARRIER' && p.status === 'Driver Assigned For Pickup'
+        ? stamp(next, 'Pickup Requested', note)
         : noted(next, note)
     })
     commit()
@@ -1125,8 +1144,8 @@ export const growOrderActions = {
         carrierPickupRef: ref ?? (c.mode === 'CARRIER' && p.carrierCode === c.code ? p.carrierPickupRef : null),
         ...(offTrip ? { tripId: null, driverName: null } : {}) }
       const note = `Allocated to ${c.name}${c.mode === 'CARRIER' ? ' (3PL)' : ' (own fleet)'}${offTrip ? ` — removed from trip ${offTrip}` : ''}`
-      const moved = c.mode === 'CARRIER' && (p.status === 'Requested' || p.status === 'Planned' || p.status === 'Ready For Last Mile Dispatch')
-        ? stamp(next, 'Assigned', note) : noted(next, note)
+      const moved = c.mode === 'CARRIER' && p.status === 'Pickup Requested'
+        ? stamp(next, 'Driver Assigned For Pickup', note) : noted(next, note)
       return ref ? noted(moved, `Booking sent to ${c.name} · ref ${ref}`) : moved
     })
     commit()
@@ -1143,7 +1162,7 @@ export const growOrderActions = {
       if (!p.carrierCode) return p
       const next = { ...p, carrierCode: null, carrierName: null, carrierMode: null, carrierPickupRef: null }
       const note = `Taken back from ${p.carrierName ?? 'carrier'} — own fleet`
-      return p.status === 'Assigned' && !p.tripId ? stamp(next, 'Requested', note) : noted(next, note)
+      return p.status === 'Driver Assigned For Pickup' && !p.tripId ? stamp(next, 'Pickup Requested', note) : noted(next, note)
     })
     commit()
   },
@@ -1156,14 +1175,14 @@ export const growOrderActions = {
    */
   markManuallyPickedUp(prId: string, orderIds: string[], note?: string) {
     const cur = db.pickupRequests.find((p) => p.id === prId)
-    if (!cur || cur.status === 'Cancelled' || cur.status === 'Completed' || cur.reattemptPrId) return
+    if (!cur || cur.status === 'Cancelled' || cur.status === 'Pickedup' || cur.reattemptPrId) return
     const want = new Set(orderIds.filter((i) => cur.orderIds.includes(i)))
     db.orders = db.orders.map((o) => (want.has(o.id) && o.pickupRequestId == null
       ? { ...o, pickupRequestId: prId } : o))
     growOrderActions.completePickupRequest(prId, { pickedOrderIds: [...new Set([...cur.pickedOrderIds, ...want])] })
     const after = db.pickupRequests.find((p) => p.id === prId)
     if (!after) return
-    if (after.status === 'Completed') {
+    if (after.status === 'Pickedup') {
       mapPr(prId, (p) => {
         const h = p.statusHistory.slice()
         const last = h[h.length - 1]
@@ -1219,12 +1238,12 @@ export const growOrderActions = {
     const number = nextPrNumber()
     const clone: GrowPickupRequest = {
       ...cur, ...win,
-      id: newPrId(), number, status: carrier ? 'Assigned' : PR_ENTRY_STATUS, createdAt,
+      id: newPrId(), number, status: carrier ? 'Driver Assigned For Pickup' : PR_ENTRY_STATUS, createdAt,
       orderIds: cur.orderIds.filter((i) => ready.has(i)), pickedOrderIds: [], overages: [],
       carrierPickupRef: carrier && cur.carrierPickupRef ? `${cur.carrierCode}-${prDigits(number)}` : null,
       statusHistory: [
         { status: PR_ENTRY_STATUS, at: createdAt, note: `Re-attempt ${attempt} of ${cur.maxAttempts} of ${cur.number}` },
-        ...(carrier ? [{ status: 'Assigned' as const, at: createdAt, note: `Re-booked with ${cur.carrierName ?? cur.carrierCode} (3PL)` }] : []),
+        ...(carrier ? [{ status: 'Driver Assigned For Pickup' as const, at: createdAt, note: `Re-booked with ${cur.carrierName ?? cur.carrierCode} (3PL)` }] : []),
       ],
       tripId: null, driverName: null, failureReason: null, cancelReason: null, manualOverride: null,
       attempt, parentPrId: cur.id, reattemptPrId: null, handover: blankHandover(cur.handover.mode), notPickedReasons: {},
@@ -1255,8 +1274,8 @@ export const growOrderActions = {
     if (prs.some((p) => !p)) return { ok: false, reason: 'Some pickup requests no longer exist' }
     const list = prs as GrowPickupRequest[]
     if (list.length < 2) return { ok: false, reason: 'Select at least two pickup requests to merge' }
-    const late = list.find((p) => p.status !== 'Requested' && p.status !== 'Planned')
-    if (late) return { ok: false, reason: `${late.number} is ${late.status} — only Requested or Planned requests can merge` }
+    const late = list.find((p) => p.status !== 'Pickup Requested')
+    if (late) return { ok: false, reason: `${late.number} is ${late.status} — only Pickup Requested requests can merge` }
     if (new Set(list.map(pointKey)).size > 1) return { ok: false, reason: 'Pickup requests are at different pickup points' }
     const hubs = [...new Set(list.map((p) => p.destinationCode ?? ''))]
     if (list.some((p) => p.shipmentType === 'FTL')) return { ok: false, reason: 'Full-vehicle bookings are never merged' }
@@ -1370,11 +1389,11 @@ export const growOrderActions = {
   carrierAccepted(prId: string): boolean {
     const cur = db.pickupRequests.find((p) => p.id === prId)
     if (!cur || cur.carrierMode !== 'CARRIER') return false
-    if (cur.status === 'Assigned' || cur.status === 'Out For Pickup') {
+    if (cur.status === 'Driver Assigned For Pickup' || cur.status === 'Out For Pickup') {
       growOrderActions.completePickupRequest(prId, { pickedOrderIds: [...cur.orderIds] })
     }
     const after = db.pickupRequests.find((p) => p.id === prId)
-    if (!after || after.status !== 'Completed') return false
+    if (!after || after.status !== 'Pickedup') return false
     if (!after.handover.closedAt) {
       const at = new Date().toISOString()
       mapPr(prId, (p) => noted({ ...p, handover: { ...p.handover, closedAt: at, arrivedAtHubAt: p.handover.arrivedAtHubAt ?? at } },
@@ -1446,7 +1465,7 @@ export const growOrderActions = {
     /* a parcel left behind was RELEASED at completion (E8), so its link is gone —
        the completed request that expected it (still unclosed) is the one to correct */
     const prId = o.pickedInRequestId ?? o.pickupRequestId
-      ?? [...db.pickupRequests].reverse().find((p) => p.status === 'Completed' && !p.handover.closedAt && p.orderIds.includes(o.id))?.id
+      ?? [...db.pickupRequests].reverse().find((p) => p.status === 'Pickedup' && !p.handover.closedAt && p.orderIds.includes(o.id))?.id
     const cur = prId ? db.pickupRequests.find((p) => p.id === prId) : undefined
     if (!cur) return { kind: 'not-picked', orderId: o.id }
     /* scenario 19 — the handover is already closed (reconciled or force-closed):
@@ -1482,7 +1501,7 @@ export const growOrderActions = {
     const hubPicks = !picked && cur.orderIds.includes(o.id)
       && (cur.handover.mode === 'hub'
         ? cur.status !== 'Cancelled' && cur.status !== 'Pickup Failed'
-        : cur.status === 'Completed')
+        : cur.status === 'Pickedup')
     if (!picked && !hubPicks) return { kind: 'not-picked', prId: cur.id, orderId: o.id }
 
     const scan: HandoverScan = { orderId: o.id, by: 'hub', at: new Date().toISOString(),
@@ -1495,7 +1514,7 @@ export const growOrderActions = {
           arrivedAtHubAt: p.handover.arrivedAtHubAt ?? scan.at } },
       `Hub in-scan ${o.orderNumber}${opts.hubCode ? ` at ${opts.hubCode}` : ''}${opts.damaged ? ' — damaged' : ''}`)
       if (hubPicks && isOpenPr(next.status) && next.orderIds.every((i) => next.pickedOrderIds.includes(i))) {
-        next = stamp(next, 'Completed', `${next.orderIds.length} of ${next.orderIds.length} collected (hub in-scan)`)
+        next = stamp(next, 'Pickedup', `${next.orderIds.length} of ${next.orderIds.length} collected (hub in-scan)`)
       }
       return next
     })
@@ -1568,7 +1587,7 @@ export const growOrderActions = {
    *  ops FORCES it (a short delivery accepted as final) — the note says why. */
   closeHandover(prId: string, force = false, note?: string): boolean {
     const p = db.pickupRequests.find((x) => x.id === prId)
-    if (!p || p.status !== 'Completed') return false
+    if (!p || p.status !== 'Pickedup') return false
     if (p.handover.closedAt) return true
     const ok = handoverReconciled(p)
     if (!ok && !force) return false

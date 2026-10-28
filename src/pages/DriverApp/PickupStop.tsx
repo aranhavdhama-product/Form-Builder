@@ -474,7 +474,7 @@ function OutcomeCard({ prId, work, bare }: { prId: string; work: PickupWork; bar
   if (!pr) return null
   const failed = pr.status === 'Pickup Failed' || pr.status === 'Cancelled'
   const notPicked = pr.orderIds.filter((i) => !pr.pickedOrderIds.includes(i))
-  const partial = pr.status === 'Completed' && notPicked.length > 0
+  const partial = pr.status === 'Pickedup' && notPicked.length > 0
   const body = (
     <>
       <div className="flex items-center gap-2">

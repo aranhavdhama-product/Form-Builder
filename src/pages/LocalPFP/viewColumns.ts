@@ -166,7 +166,7 @@ export const COMMON_COLUMNS: StagingColumn[] = [
   { key: 'c:date', label: 'Due', width: onPage('shipByDate').width },
   { key: 'c:dest', label: 'Destination', width: prWidth('hub') },
   { key: 'c:collector', label: 'Carrier / Driver', width: onPage('carrier').width },
-  { key: 'c:trip', label: 'Trip', width: prWidth('trip') },
+  { key: 'c:trip', label: 'Trip', width: 110 },
   onPage('ageing'),
   PAD,
 ]
